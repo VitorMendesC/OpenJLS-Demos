@@ -5,8 +5,16 @@ Contents:
 * `openjls.dtso` — device tree overlay: `generic-uio` nodes for `openjls_axi`
   (0x4000_0000) and the AXI DMA (0x4040_0000), plus the two `u-dma-buf`
   buffers.
-* `build.tcl` (pending) — regenerates the Vivado project (exported with
-  `write_project_tcl`; references the core sources in `ThirdParty/OpenJLS`).
+* `design_encode_ethernet.tcl` — the block design (`write_bd_tcl` export,
+  pinned to Vivado 2025.2).
+* `build.tcl` — recreates the Vivado project from it in `./build/`
+  (git-ignored): adds the core sources from `ThirdParty/OpenJLS`, sources
+  the block design, generates the HDL wrapper.
+
+  ```sh
+  vivado -mode batch -source build.tcl                       # project only
+  vivado -mode batch -source build.tcl -tclargs --bitstream  # + bitstream
+  ```
 
 Block design summary: PS7 GEM handles Ethernet; `openjls_axi` (BITNESS 8,
 max 65535x65535) + AXI DMA (Direct Register mode, buffer length register

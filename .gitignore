@@ -7,3 +7,4 @@ EncodeOverEthernet/Software/ojls_client
 *.log
 *.str
 .Xil/
+EncodeOverEthernet/Hardware/pynq-z2/build/
