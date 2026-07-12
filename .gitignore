@@ -1,0 +1,9 @@
+# Built binaries
+EncodeOverEthernet/Software/ojls_server
+EncodeOverEthernet/Software/ojls_client
+
+# Vivado clutter (projects are regenerated from Tcl)
+*.jou
+*.log
+*.str
+.Xil/
