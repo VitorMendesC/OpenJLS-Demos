@@ -29,6 +29,12 @@ set ojls_files [concat \
 add_files -fileset sources_1 $ojls_files
 set_property FILE_TYPE {VHDL 2008} [get_files $ojls_files]
 source [file join $openjls_dir Scripts create_libraries_vivado.tcl]
+# BD module references don't support VHDL-2008 sources: with the 2008 file
+# type, can_resolve_reference fails and the BD script bails out leaving an
+# empty design. openjls_axis_regs is written to also parse as VHDL-93, so
+# only this one file gets the plain type; everything below it stays 2008.
+set_property FILE_TYPE VHDL [get_files [file join $openjls_dir Sources axi openjls_axis_regs.vhd]]
+update_compile_order -fileset sources_1
 
 # Block design, then its HDL wrapper as top. All I/O is through the PS
 # (DDR/FIXED_IO), so there is no XDC.
