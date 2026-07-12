@@ -18,12 +18,12 @@ The CPU only moves bytes between the network and the AXI DMA — the encoding
 is 100% in hardware:
 
 ```
-┌─ host ───────┐            ┌─ board (PS) ─┐                     ┌─ board (PL) ─┐
-│              │─── TCP ───►│              │─── AXI DMA MM2S ───►│              │
-│ ojls_client  │            │ ojls_server  │◄─── AXI DMA S2MM ───│ openjls_axi  │
-│              │◄─── TCP ───│              │◄──── AXI-Lite ─────►│              │
-│              │   (.jls)   │              │ dims, apply, status │              │
-└──────────────┘            └──────────────┘                     └──────────────┘
+┌─ host ───────┐            ┌─ board (PS) ─┐                     ┌─ board (PL) ──────┐
+│              │─── TCP ───►│              │─── AXI DMA MM2S ───►│                   │
+│ ojls_client  │            │ ojls_server  │◄─── AXI DMA S2MM ───│ openjls_axis_regs │
+│              │◄─── TCP ───│              │◄──── AXI-Lite ─────►│                   │
+│              │   (.jls)   │              │ dims, apply, status │                   │
+└──────────────┘            └──────────────┘                     └───────────────────┘
 ```
 
 * `EncodeOverEthernet/Software/` — portable C server (board) + client
