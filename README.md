@@ -18,10 +18,12 @@ The CPU only moves bytes between the network and the AXI DMA — the encoding
 is 100% in hardware:
 
 ```
-host                         board (PS)                    board (PL)
-ojls_client  ── TCP ──►  ojls_server  ── AXI DMA MM2S ──►  openjls_axi
-   .jls      ◄── TCP ──      │        ◄── AXI DMA S2MM ──      │
-                             └── AXI-Lite: dims, apply, status ─┘
+┌─ host ───────┐            ┌─ board (PS) ─┐                     ┌─ board (PL) ─┐
+│              │─── TCP ───►│              │─── AXI DMA MM2S ───►│              │
+│ ojls_client  │            │ ojls_server  │◄─── AXI DMA S2MM ───│ openjls_axi  │
+│              │◄─── TCP ───│              │◄──── AXI-Lite ─────►│              │
+│              │   (.jls)   │              │ dims, apply, status │              │
+└──────────────┘            └──────────────┘                     └──────────────┘
 ```
 
 * `EncodeOverEthernet/Software/` — portable C server (board) + client
@@ -30,23 +32,3 @@ ojls_client  ── TCP ──►  ojls_server  ── AXI DMA MM2S ──►  o
 * `EncodeOverEthernet/Hardware/pynq-z2/` — PYNQ-Z2 (Zynq-7020): Vivado
   project regeneration script, device tree overlay, bring-up notes. Other
   boards get sibling directories.
-
-## Getting started
-
-```sh
-git clone --recursive https://github.com/VitorMendesC/OpenJLS-Demos
-```
-
-Then follow `EncodeOverEthernet/Hardware/<your-board>/README.md` to build
-the bitstream and `EncodeOverEthernet/Software/README.md` to build and run
-the applications. No directory for your board yet? The porting checklist in
-the software README lists the few things a new block design and device tree
-must provide — the software runs unmodified.
-
-## Why a separate repository?
-
-The core repository stays pure, vendor-independent VHDL with its
-verification suite. Demos are inherently vendor- and board-specific: block
-designs, constraint files, device trees. Vivado projects are regenerated
-from exported Tcl scripts, so no Xilinx-generated sources are committed
-here.
