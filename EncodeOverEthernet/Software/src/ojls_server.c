@@ -10,7 +10,7 @@
 --              through generic Linux interfaces, so the same source runs on
 --              any board whose device tree exposes:
 --
---                * the openjls_axi register bank as a UIO device,
+--                * the openjls_axis_regs register bank as a UIO device,
 --                * the AXI DMA register bank as a UIO device (IRQ optional),
 --                * one or two u-dma-buf buffers for pixel/bitstream DMA.
 --
@@ -486,7 +486,7 @@ static void usage(const char *argv0)
     fprintf(stderr,
             "Usage: %s [options]\n"
             "  -p PORT        TCP port (default %d)\n"
-            "  --regs NAME    UIO device of the openjls_axi register bank (default \"openjls\")\n"
+            "  --regs NAME    UIO device of the openjls_axis_regs register bank (default \"openjls\")\n"
             "  --dma NAME     UIO device of the AXI DMA (default \"dma\")\n"
             "  --tx-buf NAME  u-dma-buf for pixels in (default: auto-discover)\n"
             "  --rx-buf NAME  u-dma-buf for bitstream out (default: auto-discover)\n"

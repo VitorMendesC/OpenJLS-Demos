@@ -2,7 +2,7 @@
 
 Contents:
 
-* `openjls.dtso` — device tree overlay: `generic-uio` nodes for `openjls_axi`
+* `openjls.dtso` — device tree overlay: `generic-uio` nodes for `openjls_axis_regs`
   (0x4000_0000) and the AXI DMA (0x4040_0000), plus the two `u-dma-buf`
   buffers.
 * `design_encode_ethernet.tcl` — the block design (`write_bd_tcl` export,
@@ -16,7 +16,7 @@ Contents:
   vivado -mode batch -source build.tcl -tclargs --bitstream  # + bitstream
   ```
 
-Block design summary: PS7 GEM handles Ethernet; `openjls_axi` (BITNESS 8,
+Block design summary: PS7 GEM handles Ethernet; `openjls_axis_regs` (BITNESS 8,
 max 65535x65535) + AXI DMA (Direct Register mode, buffer length register
 26 bits, no IRQs — the server polls) sit in the PL on an 80 MHz fabric
 clock. See [`../../Software/README.md`](../../Software/README.md) for the

@@ -2,8 +2,8 @@
 -- Engineer:    Vitor Mendes Camilo
 --
 -- File:        ojls_regs.h
--- Description: Register map of the openjls_axi AXI4-Lite wrapper
---              (Sources/axi/openjls_axi.vhd). Byte offsets, 32-bit registers.
+-- Description: Register map of the openjls_axis_regs AXI4-Lite wrapper
+--              (Sources/axi/openjls_axis_regs.vhd). Byte offsets, 32-bit registers.
 -----------------------------------------------------------------------------------------------------------*/
 
 #ifndef OJLS_REGS_H

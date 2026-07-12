@@ -26,17 +26,17 @@ on the board itself.
 
 ## What the block design must provide
 
-The server assumes the hardware side is the `openjls_axi` wrapper
-(`ThirdParty/OpenJLS/Sources/axi/openjls_axi.vhd`) fed by a Xilinx AXI DMA:
+The server assumes the hardware side is the `openjls_axis_regs` wrapper
+(`ThirdParty/OpenJLS/Sources/axi/openjls_axis_regs.vhd`) fed by a Xilinx AXI DMA:
 
 * **AXI DMA in Direct Register mode** (Scatter/Gather disabled).
 * **Width of buffer length register ≥ 26 bits** — with the default 14 bits
   any image over 16 KiB silently truncates the transfer length.
-* MM2S stream width = the wrapper's `s_axis` width (8 bits for BITNESS 8,
+* MM2S stream width = the wrapper's `s_axis_pixel` width (8 bits for BITNESS 8,
   16 bits for BITNESS 9–16); S2MM stream width = `OUT_WIDTH` (default 64).
 * DMA interrupts to the PS are **optional** — the server polls, and sleeps on
   the UIO interrupt instead when one is wired.
-* `openjls_axi`'s `s_axi` register bank reachable from the PS (any base
+* `openjls_axis_regs`'s `s_axi_ctrl` register bank reachable from the PS (any base
   address; the device tree carries it).
 
 ## Device tree
@@ -45,7 +45,7 @@ Three kinds of nodes, addresses/sizes taken from your Address Editor
 (concrete overlays live under `../Hardware/<board>/`):
 
 ```dts
-/* openjls_axi register bank */
+/* openjls_axis_regs register bank */
 openjls@43c00000 {
     compatible = "generic-uio";
     reg = <0x43c00000 0x1000>;
@@ -125,7 +125,7 @@ byte/pixel for bitness 8 and 2 bytes/pixel for 9–16. Response payload: the
 ## Porting checklist
 
 1. Rebuild the block design for your board (see `../Hardware/` for examples):
-   `openjls_axi` + AXI DMA per the requirements above.
+   `openjls_axis_regs` + AXI DMA per the requirements above.
 2. Write the device tree overlay with your addresses; keep `openjls` and
    `dma` in the node names, or pass `--regs`/`--dma` instead.
 3. Build and load u-dma-buf for your kernel; add the two buffer nodes.
