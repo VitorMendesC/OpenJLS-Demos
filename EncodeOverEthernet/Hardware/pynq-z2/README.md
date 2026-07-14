@@ -26,18 +26,39 @@ full list of requirements the design satisfies.
 
 ### On the development machine
 
-1. **Bitstream** — implement the design, then convert the `.bit` for the
-   Linux FPGA manager (bootgen ships with Vivado):
+1. **Bitstream → `.bin`** — build the project with the bitstream:
 
    ```sh
-   echo 'all:{ system.bit }' > system.bif
+   vivado -mode batch -source build.tcl -tclargs --bitstream
+   ```
+
+   This writes the bitstream (the wrapper is the top, so the file is named
+   after it) to:
+
+   ```
+   build/encode_ethernet.runs/impl_1/design_encode_ethernet_wrapper.bit
+   ```
+
+   The Linux FPGA manager on current kernels rejects raw `.bit` files (only
+   the legacy `/dev/xdevcfg` accepted those; PYNQ's Python `Overlay` class
+   converts them in software), so convert it to a `.bin` with bootgen, which
+   ships with Vivado:
+
+   ```sh
+   cd build/encode_ethernet.runs/impl_1
+
+   # Give it a short, stable name so the board-side steps below stay simple.
+   cp design_encode_ethernet_wrapper.bit system.bit
+
+   # A .bif is just bootgen's input list: here, one bitstream and nothing else.
+   echo 'all: { system.bit }' > system.bif
+
+   # -process_bitstream bin : emit a raw .bin (no boot header) next to the .bit
+   # -arch zynq             : Zynq-7000 (PYNQ-Z2); use zynqmp for UltraScale+
+   # -w                     : overwrite any existing output
    bootgen -image system.bif -arch zynq -process_bitstream bin -w
    # -> system.bit.bin
    ```
-
-   The `fpga_manager` interface on current kernels rejects raw `.bit` files
-   (only the legacy `/dev/xdevcfg` accepted those, and PYNQ's Python class
-   converts them in software) — hence the `.bin` conversion.
 
 2. **Overlay** — compile the device tree overlay:
 
