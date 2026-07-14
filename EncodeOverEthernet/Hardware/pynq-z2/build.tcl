@@ -47,6 +47,10 @@ add_files -norecurse $wrapper
 set_property top design_encode_ethernet_wrapper [get_filesets sources_1]
 update_compile_order -fileset sources_1
 
+# Timing only closes with extra congestion spreading during placement; the
+# default strategy fails to meet timing on this design.
+set_property strategy Congestion_SpreadLogic_high [get_runs impl_1]
+
 if {[info exists argv] && [lsearch $argv "--bitstream"] >= 0} {
     launch_runs impl_1 -to_step write_bitstream -jobs 4
     wait_on_run impl_1
