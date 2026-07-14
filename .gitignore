@@ -8,3 +8,7 @@ EncodeOverEthernet/Software/ojls_client
 *.str
 .Xil/
 EncodeOverEthernet/Hardware/pynq-z2/build/
+
+# Compiled device tree overlays and bitstream artifacts (built on demand)
+*.dtbo
+*.bit.bin
