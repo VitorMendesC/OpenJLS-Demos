@@ -67,7 +67,21 @@ full list of requirements the design satisfies.
    ```
 
 3. Copy `system.bit.bin`, `openjls.dtbo`, and the `Software/` directory to
-   the board (or `git clone --recursive` the repo there directly).
+   the board over `scp` (default PYNQ login `xilinx` / `xilinx`). The board
+   is `192.168.3.1` over the USB gadget, or the `pynq` hostname / its DHCP
+   address over Ethernet — substitute whichever you're on:
+
+   ```sh
+   BOARD=xilinx@192.168.3.1   # or xilinx@pynq over Ethernet
+
+   scp build/encode_ethernet.runs/impl_1/system.bit.bin "$BOARD:~/"
+   scp openjls.dtbo "$BOARD:~/"
+   scp -r ../../Software "$BOARD:~/"
+   ```
+
+   (Paths are relative to this directory, `EncodeOverEthernet/Hardware/pynq-z2/`.)
+   Alternatively `git clone --recursive` the repo on the board directly and
+   build there.
 
 ### On the board (as root)
 
