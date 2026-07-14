@@ -4,6 +4,24 @@
 //   0x4000_0000  openjls_axis_regs register bank (4K)
 //   0x4040_0000  AXI DMA registers (64K)
 //
+// Two things about the stock PYNQ image shaped this overlay:
+//
+//  * PYNQ declares its PL `generic-uio` nodes at the device-tree *root*,
+//    not under /amba. On this kernel, overlay-added children of /amba are
+//    never instantiated as platform devices (they appear in the live tree
+//    but no /dev/uio* is created), so our nodes must go at the root too.
+//
+//  * PYNQ pre-declares a whole-PL UIO node, `fabric@40000000` (0x4000_0000,
+//    64K), which overlaps our register bank. It is harmless: UIO maps
+//    memory with ioremap but does not request_mem_region, so two UIO
+//    devices can cover the same window without conflict, and the server
+//    selects its device by name ("openjls"/"dma"), ignoring `fabric`.
+//    (Because it maps without reserving, `fabric` is also invisible to
+//    `grep /proc/iomem` — check /sys/bus/platform/drivers/uio_pdrv_genirq/
+//    to see what actually owns an address.) If you want it gone, unbind it
+//    at runtime: echo 40000000.fabric > \
+//        /sys/bus/platform/drivers/uio_pdrv_genirq/unbind
+//
 // Needs `uio_pdrv_genirq.of_id=generic-uio` on the kernel command line and
 // the u-dma-buf module loaded (see ../../Software/README.md).
 //
@@ -14,7 +32,7 @@
 
 / {
     fragment@0 {
-        target-path = "/amba";
+        target-path = "/";
         __overlay__ {
             #address-cells = <1>;
             #size-cells = <1>;
