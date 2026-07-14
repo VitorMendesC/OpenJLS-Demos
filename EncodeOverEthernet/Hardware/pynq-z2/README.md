@@ -85,10 +85,22 @@ full list of requirements the design satisfies.
 
 ### On the board (as root)
 
-4. Optional sanity: confirm nothing in the live device tree already claims
-   the PL windows (`grep -i 4000 /proc/iomem` should show no entries at
-   0x4000_0000/0x4040_0000), and don't have a PYNQ Python overlay (e.g.
-   `base.bit`) loaded at the same time.
+4. Sanity: see what already owns the PL address windows. **Do not** trust
+   `grep 4000 /proc/iomem` here — `generic-uio` maps registers without
+   reserving them, so UIO squatters never appear in `/proc/iomem`. Check the
+   driver instead:
+
+   ```sh
+   cat /sys/class/uio/uio*/name    # what UIO devices exist right now
+   ```
+
+   The stock PYNQ image ships a whole-PL UIO node, `fabric` at 0x4000_0000,
+   which overlaps our register bank. It is **harmless** — two UIO devices can
+   map the same window, and the server picks its device by name — so no need
+   to remove it. (If you prefer it gone:
+   `echo 40000000.fabric > /sys/bus/platform/drivers/uio_pdrv_genirq/unbind`.)
+   Just don't also have PYNQ's full Python overlay (`base.bit`) actively
+   driving the PL at the same time.
 
 5. **Load the bitstream first**, then the overlay, so the devices probe
    against hardware that exists:
@@ -111,7 +123,7 @@ full list of requirements the design satisfies.
 
    ```sh
    ls -l /dev/uio*
-   cat /sys/class/uio/uio*/name    # expect 40000000.openjls and 40400000.dma
+   cat /sys/class/uio/uio*/name    # among them, expect "openjls" and "dma"
    ```
 
 7. **u-dma-buf** (out-of-tree module, needs the kernel headers package):
