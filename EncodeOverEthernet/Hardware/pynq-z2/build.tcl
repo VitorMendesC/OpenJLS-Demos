@@ -12,6 +12,20 @@
 set demo_dir [file dirname [file normalize [info script]]]
 set openjls_dir [file normalize [file join $demo_dir .. .. .. ThirdParty OpenJLS]]
 
+if {![info exists argv]} { set argv {} }
+
+# --bitness N : encoder sample precision (8..16) baked into the block design.
+# Default 8 — the depth the demo was originally brought up and verified at.
+# BITNESS 8 feeds the encoder an 8-bit pixel stream; 9..16 feed 16 bits
+# (s_axis_pixel_tdata is 8*ceil(BITNESS/8) wide in openjls_axis_regs.vhd), so
+# the DMA MM2S stream width has to move with it — both are set together below.
+set bitness 8
+set bidx [lsearch $argv "--bitness"]
+if {$bidx >= 0} { set bitness [lindex $argv [expr {$bidx + 1}]] }
+if {![string is integer -strict $bitness] || $bitness < 8 || $bitness > 16} {
+    error "--bitness must be an integer in 8..16 (got '$bitness')"
+}
+
 create_project encode_ethernet [file join $demo_dir build] -part xc7z020clg400-1 -force
 set_property target_language VHDL [current_project]
 
@@ -42,6 +56,18 @@ source [file join $demo_dir design_encode_ethernet.tcl]
 if {[get_files -quiet design_encode_ethernet.bd] eq ""} {
     error "Block design was not created — see the messages above (Vivado version mismatch?)."
 }
+
+# Retarget the design to the requested precision. The encoder's BITNESS generic
+# and the DMA's stream-side data width move together: a mismatch makes
+# validate_bd_design fail on the MM2S <-> s_axis_pixel connection. The block
+# design is authored at BITNESS 8 / 8-bit stream, so only non-8 depths change.
+set pixel_stream_width [expr {$bitness <= 8 ? 8 : 16}]
+set_property CONFIG.BITNESS $bitness [get_bd_cells openjls_axis_regs_0]
+set_property CONFIG.c_m_axis_mm2s_tdata_width $pixel_stream_width [get_bd_cells axi_dma_0]
+validate_bd_design
+save_bd_design
+puts "openjls: BITNESS=$bitness, pixel stream ${pixel_stream_width}-bit"
+
 set wrapper [make_wrapper -files [get_files design_encode_ethernet.bd] -top]
 add_files -norecurse $wrapper
 set_property top design_encode_ethernet_wrapper [get_filesets sources_1]
