@@ -41,12 +41,29 @@ echo "fpga state: $state"
 # 3. restart the server, fully detached so the launching ssh channel returns —
 #    a backgrounded server otherwise holds the channel open and hangs the ssh
 #    call (the server starts regardless, but the caller would time out).
+#    stdbuf -oL: the server prints its "openjls: ... BITNESS N" banner on
+#    stdout, which is block-buffered when redirected to a file — without line
+#    buffering that line can sit unflushed for the whole run and the check
+#    below would race it. stderr (the axidma line) is already unbuffered.
+#    --tx-buf/--rx-buf: pin the DMA buffers by role. Auto-discovery opens them
+#    in alphabetical order, which puts "...-rx" first and swaps the roles — the
+#    24 MiB output buffer gets used for input and the 16 MiB input buffer for
+#    output, so the server's "raw + 25%" output-room guard then rejects large
+#    near-incompressible images that would otherwise fit. Pinning by name keeps
+#    input=16 MiB, output=24 MiB as the overlay sizes them.
 cd "$server_dir"
-setsid ./ojls_server >/tmp/ojls_server.log 2>&1 </dev/null &
-sleep 0.6
+setsid stdbuf -oL -eL ./ojls_server \
+  --tx-buf udmabuf-ojls-tx --rx-buf udmabuf-ojls-rx \
+  >/tmp/ojls_server.log 2>&1 </dev/null &
 
-# 4. report what the server saw (host also probes the TCP port before sending)
-if grep -q "BITNESS $b" /tmp/ojls_server.log 2>/dev/null; then
+# 4. confirm the server latched the intended precision from the CAPS register.
+#    Poll a few seconds: the banner appears once the buffer flushes, and the
+#    host also probes the TCP port before sending.
+for _ in $(seq 1 25); do
+  grep -q "BITNESS $b\b" /tmp/ojls_server.log 2>/dev/null && break
+  sleep 0.2
+done
+if grep -q "BITNESS $b\b" /tmp/ojls_server.log 2>/dev/null; then
   echo "server up, BITNESS $b"
 else
   echo "server did not report BITNESS $b — log:" >&2
