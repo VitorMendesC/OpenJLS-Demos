@@ -246,7 +246,7 @@ proc create_root_design { parentCell } {
     CONFIG.PCW_ACT_DCI_PERIPHERAL_FREQMHZ {10.096154} \
     CONFIG.PCW_ACT_ENET0_PERIPHERAL_FREQMHZ {125.000000} \
     CONFIG.PCW_ACT_ENET1_PERIPHERAL_FREQMHZ {10.000000} \
-    CONFIG.PCW_ACT_FPGA0_PERIPHERAL_FREQMHZ {83.333336} \
+    CONFIG.PCW_ACT_FPGA0_PERIPHERAL_FREQMHZ {50.000000} \
     CONFIG.PCW_ACT_FPGA1_PERIPHERAL_FREQMHZ {10.000000} \
     CONFIG.PCW_ACT_FPGA2_PERIPHERAL_FREQMHZ {10.000000} \
     CONFIG.PCW_ACT_FPGA3_PERIPHERAL_FREQMHZ {10.000000} \
@@ -374,7 +374,7 @@ proc create_root_design { parentCell } {
     CONFIG.PCW_FCLK2_PERIPHERAL_CLKSRC {IO PLL} \
     CONFIG.PCW_FCLK3_PERIPHERAL_CLKSRC {IO PLL} \
     CONFIG.PCW_FCLK_CLK0_BUF {TRUE} \
-    CONFIG.PCW_FPGA0_PERIPHERAL_FREQMHZ {85} \
+    CONFIG.PCW_FPGA0_PERIPHERAL_FREQMHZ {50} \
     CONFIG.PCW_FPGA1_PERIPHERAL_FREQMHZ {50} \
     CONFIG.PCW_FPGA2_PERIPHERAL_FREQMHZ {50} \
     CONFIG.PCW_FPGA3_PERIPHERAL_FREQMHZ {50} \
@@ -771,8 +771,20 @@ proc create_root_design { parentCell } {
 
   # Create instance: axi_dma_0, and set properties
   set axi_dma_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_dma:7.1 axi_dma_0 ]
+  # Scatter/Gather ON: descriptors let one logical transfer chain past the
+  # 26-bit (64 MiB) per-descriptor length cap, so images are bounded by DRAM,
+  # not by a single transfer. Enabling SG adds the M_AXI_SG descriptor-fetch
+  # master, wired into axi_mem_intercon (S02) below.
+  # c_sg_include_stscntrl_strm {0}: this SG DMA moves a plain data stream, not the
+  # AXI-Ethernet-style control/status side-channel. With the status stream ON,
+  # S2MM withholds descriptor completion until the source drives a per-packet
+  # status word on s_axis_s2mm_sts — which nothing here does (it ties off to
+  # tvalid=0), so S2MM takes all the data plus the encoder's TLAST but never
+  # writes RXEOF and the transfer hangs. MM2S is unaffected (its m_axis_mm2s_cntrl
+  # is a master output, harmless when ignored), which is why only S2MM stalled.
   set_property -dict [list \
-    CONFIG.c_include_sg {0} \
+    CONFIG.c_include_sg {1} \
+    CONFIG.c_sg_include_stscntrl_strm {0} \
     CONFIG.c_m_axi_mm2s_data_width {64} \
     CONFIG.c_m_axis_mm2s_tdata_width {8} \
     CONFIG.c_mm2s_burst_size {8} \
@@ -794,9 +806,10 @@ proc create_root_design { parentCell } {
 
   # Create instance: axi_mem_intercon, and set properties
   set axi_mem_intercon [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_interconnect:2.1 axi_mem_intercon ]
+  # Three slaves to DDR now: S00 MM2S data, S01 S2MM data, S02 SG descriptors.
   set_property -dict [list \
     CONFIG.NUM_MI {1} \
-    CONFIG.NUM_SI {2} \
+    CONFIG.NUM_SI {3} \
   ] $axi_mem_intercon
 
 
@@ -822,6 +835,7 @@ proc create_root_design { parentCell } {
   connect_bd_intf_net -intf_net axi_dma_0_M_AXIS_MM2S [get_bd_intf_pins axi_dma_0/M_AXIS_MM2S] [get_bd_intf_pins openjls_axis_regs_0/s_axis_pixel]
   connect_bd_intf_net -intf_net axi_dma_0_M_AXI_MM2S [get_bd_intf_pins axi_dma_0/M_AXI_MM2S] [get_bd_intf_pins axi_mem_intercon/S00_AXI]
   connect_bd_intf_net -intf_net axi_dma_0_M_AXI_S2MM [get_bd_intf_pins axi_dma_0/M_AXI_S2MM] [get_bd_intf_pins axi_mem_intercon/S01_AXI]
+  connect_bd_intf_net -intf_net axi_dma_0_M_AXI_SG [get_bd_intf_pins axi_dma_0/M_AXI_SG] [get_bd_intf_pins axi_mem_intercon/S02_AXI]
   connect_bd_intf_net -intf_net axi_mem_intercon_M00_AXI [get_bd_intf_pins axi_mem_intercon/M00_AXI] [get_bd_intf_pins processing_system7_0/S_AXI_HP0]
   connect_bd_intf_net -intf_net axi_smc_M00_AXI [get_bd_intf_pins axi_smc/M00_AXI] [get_bd_intf_pins axi_dma_0/S_AXI_LITE]
   connect_bd_intf_net -intf_net axi_smc_M01_AXI [get_bd_intf_pins axi_smc/M01_AXI] [get_bd_intf_pins openjls_axis_regs_0/s_axi_ctrl]
@@ -843,6 +857,8 @@ proc create_root_design { parentCell } {
   [get_bd_pins axi_mem_intercon/ACLK] \
   [get_bd_pins axi_dma_0/m_axi_s2mm_aclk] \
   [get_bd_pins axi_mem_intercon/S01_ACLK] \
+  [get_bd_pins axi_dma_0/m_axi_sg_aclk] \
+  [get_bd_pins axi_mem_intercon/S02_ACLK] \
   [get_bd_pins openjls_axis_regs_0/aclk]
   connect_bd_net -net processing_system7_0_FCLK_RESET0_N  [get_bd_pins processing_system7_0/FCLK_RESET0_N] \
   [get_bd_pins rst_ps7_0_100M/ext_reset_in]
@@ -853,6 +869,7 @@ proc create_root_design { parentCell } {
   [get_bd_pins axi_mem_intercon/M00_ARESETN] \
   [get_bd_pins axi_mem_intercon/ARESETN] \
   [get_bd_pins axi_mem_intercon/S01_ARESETN] \
+  [get_bd_pins axi_mem_intercon/S02_ARESETN] \
   [get_bd_pins openjls_axis_regs_0/aresetn]
 
   # Create address segments
@@ -860,6 +877,7 @@ proc create_root_design { parentCell } {
   assign_bd_address -offset 0x40000000 -range 0x00001000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs openjls_axis_regs_0/s_axi_ctrl/reg0] -force
   assign_bd_address -offset 0x00000000 -range 0x20000000 -target_address_space [get_bd_addr_spaces axi_dma_0/Data_MM2S] [get_bd_addr_segs processing_system7_0/S_AXI_HP0/HP0_DDR_LOWOCM] -force
   assign_bd_address -offset 0x00000000 -range 0x20000000 -target_address_space [get_bd_addr_spaces axi_dma_0/Data_S2MM] [get_bd_addr_segs processing_system7_0/S_AXI_HP0/HP0_DDR_LOWOCM] -force
+  assign_bd_address -offset 0x00000000 -range 0x20000000 -target_address_space [get_bd_addr_spaces axi_dma_0/Data_SG] [get_bd_addr_segs processing_system7_0/S_AXI_HP0/HP0_DDR_LOWOCM] -force
 
 
   # Restore current instance
