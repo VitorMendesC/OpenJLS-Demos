@@ -73,8 +73,11 @@ add_files -norecurse $wrapper
 set_property top design_encode_ethernet_wrapper [get_filesets sources_1]
 update_compile_order -fileset sources_1
 
-# Timing only closes with extra congestion spreading during placement; the
-# default strategy fails to meet timing on this design.
+# Extra congestion spreading during placement; kept as belt-and-suspenders. The
+# real timing limit here is a deep, high-fanout combinational path inside the
+# OpenJLS byte_stuffer (not congestion or fit — the part is only ~25% full), so
+# the fabric clock is held at 50 MHz (design_encode_ethernet.tcl) to close it;
+# this strategy alone does not rescue it at higher clocks.
 set_property strategy Congestion_SpreadLogic_high [get_runs impl_1]
 
 if {[info exists argv] && [lsearch $argv "--bitstream"] >= 0} {
@@ -83,5 +86,20 @@ if {[info exists argv] && [lsearch $argv "--bitstream"] >= 0} {
     if {[get_property PROGRESS [get_runs impl_1]] ne "100%"} {
         error "Implementation failed — open the project under ./build/ to inspect."
     }
+    # Vivado writes a bitstream even when timing is violated (only a critical
+    # warning), so "a .bit exists" does NOT mean the design is sound. Gate on the
+    # post-route worst negative slack: a negative WNS means a staged bitstream
+    # would be unreliable, so fail the build instead of shipping it. (This is what
+    # caught the byte_stuffer path that forced the 83 -> 50 MHz fabric clock.)
+    set wns [get_property STATS.WNS [get_runs impl_1]]
+    if {$wns eq "" } {
+        error "Could not read post-route WNS for impl_1 — cannot certify timing."
+    }
+    if {$wns < 0} {
+        error "Timing NOT met: post-route WNS = ${wns} ns. Lower the fabric clock\
+               (design_encode_ethernet.tcl PCW_*FPGA0_PERIPHERAL_FREQMHZ) or fix the\
+               failing path; refusing to stage a timing-violating bitstream."
+    }
+    puts "Timing met: post-route WNS = ${wns} ns"
     puts "Bitstream: [glob [file join $demo_dir build encode_ethernet.runs impl_1 *.bit]]"
 }
