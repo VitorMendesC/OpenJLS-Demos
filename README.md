@@ -29,6 +29,9 @@ is 100% in hardware:
 * `EncodeOverEthernet/Software/` — portable C server (board) + client
   (host). Board-agnostic — see its
   [README](EncodeOverEthernet/Software/README.md) for the porting checklist.
-* `EncodeOverEthernet/Hardware/pynq-z2/` — PYNQ-Z2 (Zynq-7020): Vivado
-  project regeneration script, device tree overlay, bring-up notes. Other
+* `EncodeOverEthernet/Hardware/pynq-z2/` — PYNQ-Z2 (Zynq-7020): the
+  scripted build-and-flash quickstart is its
+  [README](EncodeOverEthernet/Hardware/pynq-z2/README.md); the design
+  rationale, manual bring-up, and a **porting guide** for other boards live in
+  [`INTERNALS.md`](EncodeOverEthernet/Hardware/pynq-z2/INTERNALS.md). Other
   boards get sibling directories.
