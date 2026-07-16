@@ -1,8 +1,8 @@
 # PYNQ-Z2 (Zynq-7020)
 
 Build the FPGA artifacts, flash the board, encode images. Two scripts do the
-work: `build_specific_bitness.sh` on the dev machine, `board_setup.sh` on the
-board.
+work: `build_specific_bitness.sh` (or `build_all_bitness.sh`) on the dev
+machine, `board_setup.sh` on the board.
 
 The design: PS7 GEM handles Ethernet; the OpenJLS encoder (`openjls_axis_regs`,
 BITNESS 8) and an AXI DMA in Scatter/Gather mode sit in the PL on a 50 MHz
@@ -29,14 +29,12 @@ you're changing the design.
 
 Requires `vivado`, `bootgen`, and `dtc` on the dev machine, and a board on the
 network with the demo `Software/` and the `u-dma-buf` module (`u-dma-buf.ko`)
-already on it. `<N>` is the encoder precision (8..16); start with 8.
+already on it. `<N>` is the encoder pixel depth (8..16); start with 8.
 
 **1. Build the artifacts** (dev machine, from this directory):
 
 ```sh
 ./build_specific_bitness.sh 8
-# -> bitstreams/encode_eth_openjls_b8.bit.bin
-#    openjls.dtbo
 ```
 
 **2. Copy them to the board** (default PYNQ login `xilinx` / `xilinx`; the board
@@ -53,8 +51,7 @@ scp -r ../../Software "$BOARD:~/"      # first time only
 
 ```sh
 # scripts use $HOME, so under sudo pass it through explicitly
-sudo env HOME=$HOME ./board_setup.sh 8       # 8 = encoder BITNESS to load
-# -> "BOARD READY — BITNESS 8, buffers up, server listening on :19020"
+sudo env HOME=$HOME ./board_setup.sh 8
 ```
 
 `board_setup.sh` loads the PL, applies the overlay, frees the CMA pool, loads
