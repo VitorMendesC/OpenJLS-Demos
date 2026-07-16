@@ -274,7 +274,7 @@ proc create_root_design { parentCell } {
     CONFIG.PCW_CAN1_PERIPHERAL_CLKSRC {External} \
     CONFIG.PCW_CAN_PERIPHERAL_CLKSRC {IO PLL} \
     CONFIG.PCW_CAN_PERIPHERAL_VALID {0} \
-    CONFIG.PCW_CLK0_FREQ {83333336} \
+    CONFIG.PCW_CLK0_FREQ {50000000} \
     CONFIG.PCW_CLK1_FREQ {10000000} \
     CONFIG.PCW_CLK2_FREQ {10000000} \
     CONFIG.PCW_CLK3_FREQ {10000000} \
@@ -601,7 +601,7 @@ proc create_root_design { parentCell } {
     CONFIG.PCW_PACKAGE_NAME {clg400} \
     CONFIG.PCW_PCAP_PERIPHERAL_CLKSRC {IO PLL} \
     CONFIG.PCW_PCAP_PERIPHERAL_FREQMHZ {200} \
-    CONFIG.PCW_PERIPHERAL_BOARD_PRESET {None} \
+    CONFIG.PCW_PERIPHERAL_BOARD_PRESET {part0} \
     CONFIG.PCW_PLL_BYPASSMODE_ENABLE {0} \
     CONFIG.PCW_PRESET_BANK0_VOLTAGE {LVCMOS 3.3V} \
     CONFIG.PCW_PRESET_BANK1_VOLTAGE {LVCMOS 1.8V} \
@@ -771,24 +771,15 @@ proc create_root_design { parentCell } {
 
   # Create instance: axi_dma_0, and set properties
   set axi_dma_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_dma:7.1 axi_dma_0 ]
-  # Scatter/Gather ON: descriptors let one logical transfer chain past the
-  # 26-bit (64 MiB) per-descriptor length cap, so images are bounded by DRAM,
-  # not by a single transfer. Enabling SG adds the M_AXI_SG descriptor-fetch
-  # master, wired into axi_mem_intercon (S02) below.
-  # c_sg_include_stscntrl_strm {0}: this SG DMA moves a plain data stream, not the
-  # AXI-Ethernet-style control/status side-channel. With the status stream ON,
-  # S2MM withholds descriptor completion until the source drives a per-packet
-  # status word on s_axis_s2mm_sts — which nothing here does (it ties off to
-  # tvalid=0), so S2MM takes all the data plus the encoder's TLAST but never
-  # writes RXEOF and the transfer hangs. MM2S is unaffected (its m_axis_mm2s_cntrl
-  # is a master output, harmless when ignored), which is why only S2MM stalled.
   set_property -dict [list \
+    CONFIG.c_include_mm2s {1} \
+    CONFIG.c_include_s2mm {1} \
+    CONFIG.c_include_s2mm_dre {0} \
     CONFIG.c_include_sg {1} \
-    CONFIG.c_sg_include_stscntrl_strm {0} \
     CONFIG.c_m_axi_mm2s_data_width {64} \
     CONFIG.c_m_axis_mm2s_tdata_width {8} \
     CONFIG.c_mm2s_burst_size {8} \
-    CONFIG.c_s_axis_s2mm_tdata_width {64} \
+    CONFIG.c_sg_include_stscntrl_strm {0} \
     CONFIG.c_sg_length_width {26} \
   ] $axi_dma_0
 
@@ -806,7 +797,6 @@ proc create_root_design { parentCell } {
 
   # Create instance: axi_mem_intercon, and set properties
   set axi_mem_intercon [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_interconnect:2.1 axi_mem_intercon ]
-  # Three slaves to DDR now: S00 MM2S data, S01 S2MM data, S02 SG descriptors.
   set_property -dict [list \
     CONFIG.NUM_MI {1} \
     CONFIG.NUM_SI {3} \
@@ -857,9 +847,9 @@ proc create_root_design { parentCell } {
   [get_bd_pins axi_mem_intercon/ACLK] \
   [get_bd_pins axi_dma_0/m_axi_s2mm_aclk] \
   [get_bd_pins axi_mem_intercon/S01_ACLK] \
+  [get_bd_pins openjls_axis_regs_0/aclk] \
   [get_bd_pins axi_dma_0/m_axi_sg_aclk] \
-  [get_bd_pins axi_mem_intercon/S02_ACLK] \
-  [get_bd_pins openjls_axis_regs_0/aclk]
+  [get_bd_pins axi_mem_intercon/S02_ACLK]
   connect_bd_net -net processing_system7_0_FCLK_RESET0_N  [get_bd_pins processing_system7_0/FCLK_RESET0_N] \
   [get_bd_pins rst_ps7_0_100M/ext_reset_in]
   connect_bd_net -net rst_ps7_0_100M_peripheral_aresetn  [get_bd_pins rst_ps7_0_100M/peripheral_aresetn] \
@@ -869,8 +859,8 @@ proc create_root_design { parentCell } {
   [get_bd_pins axi_mem_intercon/M00_ARESETN] \
   [get_bd_pins axi_mem_intercon/ARESETN] \
   [get_bd_pins axi_mem_intercon/S01_ARESETN] \
-  [get_bd_pins axi_mem_intercon/S02_ARESETN] \
-  [get_bd_pins openjls_axis_regs_0/aresetn]
+  [get_bd_pins openjls_axis_regs_0/aresetn] \
+  [get_bd_pins axi_mem_intercon/S02_ARESETN]
 
   # Create address segments
   assign_bd_address -offset 0x40400000 -range 0x00010000 -target_address_space [get_bd_addr_spaces processing_system7_0/Data] [get_bd_addr_segs axi_dma_0/S_AXI_LITE/Reg] -force
