@@ -35,11 +35,11 @@ device-tree overlay and `u-dma-buf` are precision-independent and stay loaded.
 | `board_setup.sh`   | board | **one-shot bring-up after a power cycle**: load PL + overlay, free CMA, load `u-dma-buf`, verify buffers, start server |
 | `board_reload.sh`  | board | lighter per-depth path: reload a depth's bitstream + restart the server (copied over by the driver) |
 
-`board_setup.sh` is the whole board-side "On the board" section of
-`../Hardware/pynq-z2/README.md` collapsed into one idempotent command — run it
-once after each boot and the board is ready. `board_reload.sh` is what the sweep
-calls between depths, when the overlay and `u-dma-buf` are already up and only
-the PL image and server need to cycle.
+`board_setup.sh` is the whole board-side bring-up (documented step by step in
+`../Hardware/pynq-z2/INTERNALS.md`) collapsed into one idempotent command — run
+it once after each boot and the board is ready. `board_reload.sh` is what the
+sweep calls between depths, when the overlay and `u-dma-buf` are already up and
+only the PL image and server need to cycle.
 
 ## Prerequisites
 
@@ -56,8 +56,8 @@ exact command for anything missing):
 - **Board** — reachable over ssh with **key-based** auth, the demo `Software/`
   built there (`ojls_server`), and brought up once with `board_setup.sh` (loads
   PL + overlay + `u-dma-buf`, starts the server; see
-  `../Hardware/pynq-z2/README.md`). The driver stages the bitstreams and reload
-  script itself.
+  `../Hardware/pynq-z2/INTERNALS.md`). The driver stages the bitstreams and
+  reload script itself.
 
 ## Running
 
