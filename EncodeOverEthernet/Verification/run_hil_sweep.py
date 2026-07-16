@@ -41,7 +41,8 @@ Configuration (all via environment, sensible defaults for the in-tree layout):
   CLIENT           path to the host ojls_client
   OUT_DIR          scratch for goldens / encoded outputs / results.csv
   PORT             server TCP port (default 19020)
-  TX_BYTES         board tx buffer cap; images above it are skipped (default 16M)
+  TX_BYTES         board tx buffer cap; images above it are skipped (default 128M,
+                   the scatter-gather overlay's udmabuf-ojls-tx size)
 
 Usage:
   ./run_hil_sweep.py                 # full sweep over every available depth
@@ -74,7 +75,7 @@ CHARLS = env("CHARLS", os.path.join(OJLS, "ThirdParty", "charls", "build", "cli"
 CLIENT = env("CLIENT", os.path.join(DEMO, "Software", "ojls_client"))
 OUT_DIR = env("OUT_DIR", os.path.join(HERE, "out"))
 PORT = int(env("PORT", "19020"))
-TX_BYTES = int(env("TX_BYTES", str(16 * 1024 * 1024)))
+TX_BYTES = int(env("TX_BYTES", str(128 * 1024 * 1024)))
 
 REF_DIR = os.path.join(OJLS, "Verification", "T87 conformance", "Reference Images")
 GATE_PGM = os.path.join(REF_DIR, "TEST16.PGM")
