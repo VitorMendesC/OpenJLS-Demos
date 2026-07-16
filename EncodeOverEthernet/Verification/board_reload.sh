@@ -45,15 +45,11 @@ echo "fpga state: $state"
 #    stdout, which is block-buffered when redirected to a file — without line
 #    buffering that line can sit unflushed for the whole run and the check
 #    below would race it. stderr (the axidma line) is already unbuffered.
-#    --tx-buf/--rx-buf: pin the DMA buffers by role. Auto-discovery opens them
-#    in alphabetical order, which puts "...-rx" first and swaps the roles — the
-#    24 MiB output buffer gets used for input and the 16 MiB input buffer for
-#    output, so the server's "raw + 25%" output-room guard then rejects large
-#    near-incompressible images that would otherwise fit. Pinning by name keeps
-#    input=16 MiB, output=24 MiB as the overlay sizes them.
+#    The server opens its three DMA buffers (udmabuf-ojls-{tx,rx,desc}) by
+#    name, so no --*-buf flags are needed; pass them only to override the
+#    defaults for a differently-named overlay.
 cd "$server_dir"
 setsid stdbuf -oL -eL ./ojls_server \
-  --tx-buf udmabuf-ojls-tx --rx-buf udmabuf-ojls-rx \
   >/tmp/ojls_server.log 2>&1 </dev/null &
 
 # 4. confirm the server latched the intended precision from the CAPS register.
