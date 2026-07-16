@@ -2,20 +2,35 @@
 -- Engineer:    Vitor Mendes Camilo
 --
 -- File:        axidma.h
--- Description: Minimal driver for the Xilinx AXI DMA (PG021) in Direct
---              Register (simple) mode — Scatter/Gather disabled.
+-- Description: Minimal driver for the Xilinx AXI DMA (PG021) in
+--              Scatter/Gather mode.
 --
---              One transfer per channel at a time:
---                MM2S reads `len` bytes at `phys` and streams them out
---                (pixels into the encoder).
---                S2MM writes the incoming stream at `phys` until TLAST or
---                `maxlen` bytes (encoded stream out of the encoder); the
---                actual byte count is read back after completion.
+--              SG lets one logical transfer chain several descriptors, so a
+--              transfer is no longer capped at the 26-bit (64 MiB) length
+--              register — it is bounded only by the DMA buffers (and thus by
+--              reservable DRAM). Each channel is driven by a small ring of
+--              64-byte descriptors that the caller builds over a contiguous
+--              u-dma-buf:
 --
---              Completion is detected by polling the status register; if the
---              UIO node has an interrupt wired, the poll loop sleeps on it
---              instead of busy-waiting (either of the DMA's two IRQs works —
---              status is re-checked on every wakeup).
+--                MM2S reads the pixel bytes and streams them out. The ring is
+--                *framed* (SOF on the first descriptor, EOF on the last) so the
+--                whole multi-descriptor transfer presents a single TLAST-framed
+--                packet to the encoder, exactly as one direct-mode transfer did.
+--
+--                S2MM writes the encoded stream across the ring until the
+--                encoder raises TLAST; the DMA marks that descriptor RXEOF and
+--                records the byte count of each descriptor in its status word.
+--
+--              Completion is detected from the descriptor status written back
+--              to DRAM, NOT from the channel's IOC status bit: with a unit
+--              interrupt threshold IOC would fire on the first *filled* S2MM
+--              descriptor, long before the encoder's TLAST. The wait therefore
+--              invalidates and scans the ring (and still checks the status
+--              register's error bits for a fast fault path).
+--
+--              Descriptors live in a caller-provided u-dma-buf region so they
+--              are physically addressable by the DMA's M_AXI_SG master and can
+--              be cache-synced with the same API as the data buffers.
 -----------------------------------------------------------------------------------------------------------*/
 
 #ifndef AXIDMA_H
@@ -23,17 +38,20 @@
 
 #include <stdint.h>
 
+#include "udmabuf.h"
 #include "uio.h"
 
-/* Register offsets (PG021). MM2S at 0x00, S2MM at 0x30. */
+/* Register offsets (PG021). MM2S at 0x00, S2MM at 0x30. In SG mode the engine
+ * is steered by descriptor pointers rather than a direct address/length. */
 #define AXIDMA_MM2S 0x00u
 #define AXIDMA_S2MM 0x30u
 
-#define AXIDMA_CR(chan)   ((chan) + 0x00u) /* control                        */
-#define AXIDMA_SR(chan)   ((chan) + 0x04u) /* status                         */
-#define AXIDMA_ADDR(chan) ((chan) + 0x18u) /* MM2S_SA / S2MM_DA              */
-#define AXIDMA_MSB(chan)  ((chan) + 0x1Cu) /* upper 32 address bits          */
-#define AXIDMA_LEN(chan)  ((chan) + 0x28u) /* length in bytes; write starts  */
+#define AXIDMA_CR(chan)          ((chan) + 0x00u) /* control                   */
+#define AXIDMA_SR(chan)          ((chan) + 0x04u) /* status                    */
+#define AXIDMA_CURDESC(chan)     ((chan) + 0x08u) /* first descriptor, 64B-aln */
+#define AXIDMA_CURDESC_MSB(chan) ((chan) + 0x0Cu) /* upper 32 bits             */
+#define AXIDMA_TAILDESC(chan)    ((chan) + 0x10u) /* last descriptor; starts   */
+#define AXIDMA_TAILDESC_MSB(chan)((chan) + 0x14u) /* upper 32 bits             */
 
 /* Control bits */
 #define AXIDMA_CR_RS       (1u << 0)
@@ -51,6 +69,42 @@
 #define AXIDMA_SR_ERR      (1u << 14)
 #define AXIDMA_SR_ANY_ERR  (AXIDMA_SR_INT_ERR | AXIDMA_SR_SLV_ERR | AXIDMA_SR_DEC_ERR | AXIDMA_SR_ERR)
 
+/* One 64-byte SG descriptor (PG021 §"SG Descriptors"). 13 words are defined;
+ * the struct is padded to the 64-byte alignment the next-pointer requires. */
+struct axidma_desc {
+    uint32_t nxtdesc;      /* 0x00: next descriptor phys (64B-aligned)         */
+    uint32_t nxtdesc_msb;  /* 0x04                                             */
+    uint32_t buffer_addr;  /* 0x08: data buffer phys                           */
+    uint32_t buffer_msb;   /* 0x0C                                             */
+    uint32_t rsvd0;        /* 0x10                                             */
+    uint32_t rsvd1;        /* 0x14                                             */
+    uint32_t control;      /* 0x18: [25:0] len, bit26 EOF, bit27 SOF (MM2S)    */
+    uint32_t status;       /* 0x1C: [25:0] transferred, b26 RXEOF, b31 Cmplt   */
+    uint32_t app[5];       /* 0x20..0x30: unused (no status/control stream)    */
+    uint32_t pad[3];       /* pad to 64 bytes                                  */
+};
+
+/* Descriptor control/status bit fields */
+#define AXIDMA_DESC_LEN_MASK 0x03FFFFFFu /* 26-bit buffer length / xfer count  */
+#define AXIDMA_DESC_EOF      (1u << 26)  /* control: TLAST here / status: RXEOF */
+#define AXIDMA_DESC_SOF      (1u << 27)  /* control: TFIRST                     */
+#define AXIDMA_DESC_CMPLT    (1u << 31)  /* status: descriptor completed        */
+#define AXIDMA_DESC_ERR_MASK (7u << 28)  /* status: Int/Slv/Dec error bits      */
+
+/* Largest byte count one descriptor can carry (26-bit length register). We
+ * chunk buffers well under it on a clean boundary for burst alignment. */
+#define AXIDMA_DESC_CHUNK    (32u * 1024u * 1024u) /* 32 MiB per descriptor     */
+
+/* A descriptor ring built over a slice of a u-dma-buf. Self-describing so the
+ * wait can invalidate exactly the descriptor bytes it scans. */
+struct axidma_ring {
+    const struct udmabuf *db;    /* buffer the descriptors live in            */
+    size_t              off;     /* byte offset of desc[0] within db          */
+    struct axidma_desc *desc;    /* CPU pointer to desc[0]                    */
+    uint64_t            phys;    /* bus address of desc[0]                    */
+    int                 count;   /* descriptors built                        */
+};
+
 struct axidma {
     struct uio uio;
 };
@@ -60,24 +114,34 @@ struct axidma {
 int  axidma_open(struct axidma *d, const char *name_or_path);
 void axidma_close(struct axidma *d);
 
-/* Soft-reset the whole engine (both channels). Returns 0, or -1 if the
- * reset bit never self-cleared. */
+/* Soft-reset the whole engine (both channels). Returns 0, or -1 if the reset
+ * bit never self-cleared. */
 int axidma_reset(struct axidma *d);
 
-/* Start a transfer on `chan` (AXIDMA_MM2S or AXIDMA_S2MM). `len` must be
- * nonzero and within the length-register width configured in the block
- * design. Returns 0 or -1. */
-int axidma_start(struct axidma *d, uint32_t chan, uint64_t phys, uint32_t len);
+/* Build a descriptor ring in the u-dma-buf region [db + desc_off, +desc_cap)
+ * that maps the contiguous data buffer [buf_phys, buf_phys + len) in chunks of
+ * at most AXIDMA_DESC_CHUNK. `frame` != 0 sets SOF on the first descriptor and
+ * EOF on the last (use it for MM2S so the encoder sees one TLAST-framed
+ * packet; leave 0 for S2MM). Returns 0, or -1 if the region cannot hold the
+ * required descriptors. Descriptors are written but not yet synced. */
+int axidma_ring_build(struct axidma_ring *ring, const struct udmabuf *db,
+                      size_t desc_off, size_t desc_cap,
+                      uint64_t buf_phys, uint64_t len, int frame);
 
-/* Wait for completion (IOC) on `chan`. Returns 0 on completion, -1 on DMA
- * error (status printed to stderr), -2 on timeout. */
-int axidma_wait(struct axidma *d, uint32_t chan, int timeout_ms);
+/* Start `chan` processing `ring` (reset assumed done): program CURDESC, raise
+ * RS, then write TAILDESC to kick. Returns 0 or -1. */
+int axidma_sg_start(struct axidma *d, uint32_t chan, const struct axidma_ring *ring);
 
-/* Bytes actually transferred by the last completed transfer on `chan`
- * (for S2MM this is the encoded length when TLAST ended the transfer). */
-static inline uint32_t axidma_bytes(struct axidma *d, uint32_t chan)
-{
-    return uio_rd(&d->uio, AXIDMA_LEN(chan));
-}
+/* Wait for `ring` on `chan` to finish. Completion is a descriptor marked EOF
+ * (S2MM: the encoder's TLAST) or the last descriptor completing (MM2S). The
+ * ring's descriptor bytes are invalidated and scanned each poll; the status
+ * register is checked for errors. Returns 0 on completion, -1 on DMA error
+ * (decoded to stderr), -2 on timeout. On return 0 the ring is CPU-coherent so
+ * axidma_ring_bytes() can be read straight away. */
+int axidma_wait(struct axidma *d, uint32_t chan, struct axidma_ring *ring, int timeout_ms);
+
+/* Total bytes the DMA moved for `ring`: the sum of per-descriptor counts up to
+ * and including the EOF descriptor. Valid after axidma_wait() returns 0. */
+uint32_t axidma_ring_bytes(const struct axidma_ring *ring);
 
 #endif /* AXIDMA_H */
