@@ -29,9 +29,12 @@ on the board itself.
 The server assumes the hardware side is the `openjls_axis_regs` wrapper
 (`ThirdParty/OpenJLS/Sources/axi/openjls_axis_regs.vhd`) fed by a Xilinx AXI DMA:
 
-* **AXI DMA in Direct Register mode** (Scatter/Gather disabled).
-* **Width of buffer length register ≥ 26 bits** — with the default 14 bits
-  any image over 16 KiB silently truncates the transfer length.
+* **AXI DMA in Scatter/Gather mode.** The server builds a descriptor ring per
+  channel (in a third u-dma-buf, below), so one logical transfer chains past
+  the 64 MiB a 26-bit length register allows — an image is bounded by the DMA
+  buffers, not the DMA. The MM2S ring is framed (SOF/EOF) so the pixels present
+  as one TLAST packet however many descriptors they span; the S2MM ring is
+  walked after TLAST to sum the encoded byte count.
 * MM2S stream width = the wrapper's `s_axis_pixel` width (8 bits for BITNESS 8,
   16 bits for BITNESS 9–16); S2MM stream width = `OUT_WIDTH` (default 64).
 * DMA interrupts to the PS are **optional** — the server polls, and sleeps on
@@ -58,16 +61,23 @@ dma@40400000 {
     /* interrupt-parent = <&intc>; interrupts = <0 29 4>; */
 };
 
-/* DMA buffers — one for pixels in, one for the bitstream out */
+/* DMA buffers — pixels in, bitstream out, and the SG descriptor rings.
+ * These come from the kernel CMA pool; sizes this large need the pool grown
+ * on the kernel command line (e.g. cma=320M). See ../Hardware/pynq-z2/README.md. */
 udmabuf-ojls-tx {
     compatible = "ikwzm,u-dma-buf";
     device-name = "udmabuf-ojls-tx";
-    size = <0x02000000>;  /* 32 MiB: fits 4096x4096 @ 2 B/pixel */
+    size = <0x08000000>;  /* 128 MiB: max input image raw size */
 };
 udmabuf-ojls-rx {
     compatible = "ikwzm,u-dma-buf";
     device-name = "udmabuf-ojls-rx";
-    size = <0x02800000>;  /* raw size + 25% + slack for incompressible input */
+    size = <0x0b000000>;  /* 176 MiB: raw size + 25% + slack for incompressible input */
+};
+udmabuf-ojls-desc {
+    compatible = "ikwzm,u-dma-buf";
+    device-name = "udmabuf-ojls-desc";
+    size = <0x00040000>;  /* 256 KiB: SG descriptor rings */
 };
 ```
 
@@ -77,8 +87,8 @@ Two gotchas:
   contains `uio_pdrv_genirq.of_id=generic-uio`.
 * `u-dma-buf` is an out-of-tree module — build it once for your kernel from
   <https://github.com/ikwzm/udmabuf> and `insmod`/`modprobe` it before
-  starting the server. A single buffer also works (the server splits it in
-  half), as do explicit names via `--tx-buf`/`--rx-buf`.
+  starting the server. The server opens `udmabuf-ojls-{tx,rx,desc}` by name;
+  override any of them with `--tx-buf`/`--rx-buf`/`--desc-buf`.
 
 ## Running
 
@@ -128,7 +138,8 @@ byte/pixel for bitness 8 and 2 bytes/pixel for 9–16. Response payload: the
    `openjls_axis_regs` + AXI DMA per the requirements above.
 2. Write the device tree overlay with your addresses; keep `openjls` and
    `dma` in the node names, or pass `--regs`/`--dma` instead.
-3. Build and load u-dma-buf for your kernel; add the two buffer nodes.
+3. Build and load u-dma-buf for your kernel; add the three buffer nodes
+   (tx/rx/desc), sized to your CMA pool.
 4. `make` on the board (or cross-compile) and run `ojls_server`.
 
 Nothing in `Software/` should need changes — if it does, that's a bug worth
