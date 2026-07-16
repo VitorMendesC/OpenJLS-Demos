@@ -54,19 +54,39 @@
                  */
             };
 
-            /* Pixels in: 16 MiB fits the 4096x4096 @ 8-bit maximum. */
+            /* DMA buffers. With scatter-gather enabled the AXI DMA chains
+             * descriptors, so a transfer is no longer capped at 64 MiB — the
+             * image size is bounded only by these buffers, which u-dma-buf
+             * allocates from the kernel CMA pool. To use buffers this large the
+             * pool must be grown on the kernel command line, e.g. `cma=320M`
+             * (default is 128 MiB); a too-small pool makes u-dma-buf fail to
+             * allocate and these nodes never appear. Sizes here reserve
+             * ~304 MiB total, leaving ~192 MiB for a slimmed userspace on the
+             * 512 MiB board — see README for the boot-arg + service-trim steps
+             * and for pushing the ceiling higher.
+             *
+             * Pixels in: 128 MiB (max input image raw size). */
             udmabuf-ojls-tx {
                 compatible = "ikwzm,u-dma-buf";
                 device-name = "udmabuf-ojls-tx";
-                size = <0x01000000>;
+                size = <0x08000000>;
             };
 
-            /* Bitstream out: raw size + 25% + slack, per the server's
-             * worst-case check. */
+            /* Bitstream out: 176 MiB — covers the server's worst-case
+             * raw + 25% + slack guard for a full 128 MiB input. */
             udmabuf-ojls-rx {
                 compatible = "ikwzm,u-dma-buf";
                 device-name = "udmabuf-ojls-rx";
-                size = <0x01800000>;
+                size = <0x0B000000>;
+            };
+
+            /* SG descriptor rings: 256 KiB is far more than the handful of
+             * 64-byte descriptors the two channels ever need (one per 32 MiB
+             * chunk of the tx/rx buffers). */
+            udmabuf-ojls-desc {
+                compatible = "ikwzm,u-dma-buf";
+                device-name = "udmabuf-ojls-desc";
+                size = <0x00040000>;
             };
         };
     };
