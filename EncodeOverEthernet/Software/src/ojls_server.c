@@ -12,7 +12,8 @@
 --
 --                * the openjls_axis_regs register bank as a UIO device,
 --                * the AXI DMA register bank as a UIO device (IRQ optional),
---                * one or two u-dma-buf buffers for pixel/bitstream DMA.
+--                * three u-dma-buf buffers: pixels in, bitstream out, and the
+--                  scatter-gather descriptor rings.
 --
 --              Per image: validate the request against the hardware CAPS,
 --              write WIDTH/HEIGHT + CTRL.APPLY (a 16-cycle core reset pulse
@@ -44,11 +45,8 @@
 #include "udmabuf.h"
 #include "uio.h"
 
-/* Largest value a 26-bit DMA length register can hold; the README asks for
- * the block design to configure at least this width. */
-#define DMA_LEN_MAX ((1u << 26) - 1)
-
-/* A view into (part of) a u-dma-buf, so one buffer can be split tx/rx. */
+/* A view into (part of) a u-dma-buf. Kept as a thin wrapper so the transfer
+ * code reads uniformly; with dedicated buffers the offset is always 0. */
 struct dmabuf_region {
     struct udmabuf *b;
     size_t          off;
@@ -61,8 +59,9 @@ static uint64_t region_phys(const struct dmabuf_region *r)  { return r->b->phys 
 struct hw {
     struct uio           regs;
     struct axidma        dma;
-    struct udmabuf       buf[2];
-    int                  nbufs;
+    struct udmabuf       tx_buf;    /* pixels in                              */
+    struct udmabuf       rx_buf;    /* bitstream out                          */
+    struct udmabuf       desc_buf;  /* SG descriptor rings                    */
     struct dmabuf_region tx;
     struct dmabuf_region rx;
     uint32_t             bitness;
@@ -74,8 +73,9 @@ struct options {
     int         port;
     const char *regs_name;
     const char *dma_name;
-    const char *tx_buf;   /* NULL = auto */
-    const char *rx_buf;   /* NULL = auto */
+    const char *tx_buf;   /* NULL = default name */
+    const char *rx_buf;   /* NULL = default name */
+    const char *desc_buf; /* NULL = default name */
     int         timeout_ms;
     int         loopback;
 };
@@ -206,44 +206,39 @@ static int hw_open(struct hw *hw, const struct options *opt)
     if (axidma_open(&hw->dma, opt->dma_name) != 0)
         return -1;
 
-    /* Buffers: explicit names > two auto-discovered devices > one device
-     * split down the middle. */
-    if (opt->tx_buf != NULL && opt->rx_buf != NULL) {
-        if (udmabuf_open(&hw->buf[0], opt->tx_buf) != 0 ||
-            udmabuf_open(&hw->buf[1], opt->rx_buf) != 0)
+    /* Three buffers, opened by name (default to the overlay's canonical
+     * names): pixels in, bitstream out, and the SG descriptor rings. Opening
+     * by name — not by discovery order — is deliberate: u-dma-buf enumerates
+     * devices alphabetically, so an index-based scan would put "...-rx" before
+     * "...-tx" and silently swap the tx/rx roles. */
+    {
+        const char *tx_name   = (opt->tx_buf   != NULL) ? opt->tx_buf   : "udmabuf-ojls-tx";
+        const char *rx_name   = (opt->rx_buf   != NULL) ? opt->rx_buf   : "udmabuf-ojls-rx";
+        const char *desc_name = (opt->desc_buf != NULL) ? opt->desc_buf : "udmabuf-ojls-desc";
+
+        if (udmabuf_open(&hw->tx_buf, tx_name) != 0 ||
+            udmabuf_open(&hw->rx_buf, rx_name) != 0 ||
+            udmabuf_open(&hw->desc_buf, desc_name) != 0)
             return -1;
-        hw->nbufs = 2;
-    } else if (udmabuf_count() >= 2) {
-        if (udmabuf_open_nth(&hw->buf[0], 0) != 0 || udmabuf_open_nth(&hw->buf[1], 1) != 0)
-            return -1;
-        hw->nbufs = 2;
-    } else {
-        if (udmabuf_open_nth(&hw->buf[0], 0) != 0)
-            return -1;
-        hw->nbufs = 1;
     }
 
-    if (hw->nbufs == 2) {
-        hw->tx = (struct dmabuf_region){ .b = &hw->buf[0], .off = 0, .size = hw->buf[0].size };
-        hw->rx = (struct dmabuf_region){ .b = &hw->buf[1], .off = 0, .size = hw->buf[1].size };
-    } else {
-        const size_t half = hw->buf[0].size / 2;
+    hw->tx = (struct dmabuf_region){ .b = &hw->tx_buf, .off = 0, .size = hw->tx_buf.size };
+    hw->rx = (struct dmabuf_region){ .b = &hw->rx_buf, .off = 0, .size = hw->rx_buf.size };
 
-        hw->tx = (struct dmabuf_region){ .b = &hw->buf[0], .off = 0, .size = half };
-        hw->rx = (struct dmabuf_region){ .b = &hw->buf[0], .off = half, .size = half };
-    }
-
-    printf("buffers: tx \"%s\" %zu KiB @ 0x%09" PRIx64 ", rx \"%s\" %zu KiB @ 0x%09" PRIx64 "\n",
+    printf("buffers: tx \"%s\" %zu KiB @ 0x%09" PRIx64 ", rx \"%s\" %zu KiB @ 0x%09" PRIx64
+           ", desc \"%s\" %zu KiB\n",
            hw->tx.b->name, hw->tx.size / 1024, region_phys(&hw->tx),
-           hw->rx.b->name, hw->rx.size / 1024, region_phys(&hw->rx));
+           hw->rx.b->name, hw->rx.size / 1024, region_phys(&hw->rx),
+           hw->desc_buf.name, hw->desc_buf.size / 1024);
 
     return 0;
 }
 
 static void hw_close(struct hw *hw)
 {
-    for (int i = 0; i < hw->nbufs; i++)
-        udmabuf_close(&hw->buf[i]);
+    udmabuf_close(&hw->desc_buf);
+    udmabuf_close(&hw->rx_buf);
+    udmabuf_close(&hw->tx_buf);
     axidma_close(&hw->dma);
     uio_close(&hw->regs);
 }
@@ -291,8 +286,9 @@ static void hw_recover(struct hw *hw, uint16_t width, uint16_t height)
  * the caller to report. */
 static int encode_and_reply(int fd, struct hw *hw, const struct ojls_hdr *req, int timeout_ms)
 {
-    const uint32_t in_bytes = req->payload_len;
-    const uint32_t rx_cap   = (hw->rx.size < DMA_LEN_MAX) ? (uint32_t)hw->rx.size : DMA_LEN_MAX;
+    const uint32_t in_bytes  = req->payload_len;
+    const size_t   desc_half = hw->desc_buf.size / 2;
+    struct axidma_ring mm2s, s2mm;
     struct ojls_hdr resp;
     uint8_t         hdr_buf[OJLS_PROTO_HDR_LEN];
     uint32_t        out_bytes;
@@ -305,14 +301,30 @@ static int encode_and_reply(int fd, struct hw *hw, const struct ojls_hdr *req, i
     if (udmabuf_sync_for_device(hw->tx.b, hw->tx.off, in_bytes) != 0)
         return OJLS_ST_HW_ERROR;
 
+    /* Fresh engine per image so no residual SG state carries over, then build
+     * the two descriptor rings in their own buffer: S2MM spans the whole rx
+     * buffer (the DMA stops early on the encoder's TLAST); MM2S is framed so
+     * the pixels present as one packet however many descriptors they take. */
+    if (axidma_reset(&hw->dma) != 0)
+        return OJLS_ST_HW_ERROR;
+
+    if (axidma_ring_build(&s2mm, &hw->desc_buf, 0, desc_half,
+                          region_phys(&hw->rx), hw->rx.size, 0) != 0 ||
+        axidma_ring_build(&mm2s, &hw->desc_buf, desc_half, hw->desc_buf.size - desc_half,
+                          region_phys(&hw->tx), in_bytes, 1) != 0)
+        return OJLS_ST_HW_ERROR;
+
+    if (udmabuf_sync_for_device(&hw->desc_buf, 0, hw->desc_buf.size) != 0)
+        return OJLS_ST_HW_ERROR;
+
     t0 = now_us();
 
     /* Arm the receive side before feeding pixels. */
-    if (axidma_start(&hw->dma, AXIDMA_S2MM, region_phys(&hw->rx), rx_cap) != 0 ||
-        axidma_start(&hw->dma, AXIDMA_MM2S, region_phys(&hw->tx), in_bytes) != 0)
+    if (axidma_sg_start(&hw->dma, AXIDMA_S2MM, &s2mm) != 0 ||
+        axidma_sg_start(&hw->dma, AXIDMA_MM2S, &mm2s) != 0)
         return OJLS_ST_HW_ERROR;
 
-    rc = axidma_wait(&hw->dma, AXIDMA_S2MM, timeout_ms);
+    rc = axidma_wait(&hw->dma, AXIDMA_S2MM, &s2mm, timeout_ms);
     if (rc == -2) {
         hw_recover(hw, req->width, req->height);
         return OJLS_ST_HW_TIMEOUT;
@@ -324,9 +336,9 @@ static int encode_and_reply(int fd, struct hw *hw, const struct ojls_hdr *req, i
 
     t1 = now_us();
 
-    /* TLAST ended the transfer; the length register now holds the actual
-     * encoded byte count. */
-    out_bytes = axidma_bytes(&hw->dma, AXIDMA_S2MM);
+    /* TLAST ended the transfer; sum the descriptor byte counts for the actual
+     * encoded length (axidma_wait already synced the ring for the CPU). */
+    out_bytes = axidma_ring_bytes(&s2mm);
 
     if (udmabuf_sync_for_cpu(hw->rx.b, hw->rx.off, out_bytes) != 0)
         return OJLS_ST_HW_ERROR;
@@ -488,8 +500,9 @@ static void usage(const char *argv0)
             "  -p PORT        TCP port (default %d)\n"
             "  --regs NAME    UIO device of the openjls_axis_regs register bank (default \"openjls\")\n"
             "  --dma NAME     UIO device of the AXI DMA (default \"dma\")\n"
-            "  --tx-buf NAME  u-dma-buf for pixels in (default: auto-discover)\n"
-            "  --rx-buf NAME  u-dma-buf for bitstream out (default: auto-discover)\n"
+            "  --tx-buf NAME  u-dma-buf for pixels in (default \"udmabuf-ojls-tx\")\n"
+            "  --rx-buf NAME  u-dma-buf for bitstream out (default \"udmabuf-ojls-rx\")\n"
+            "  --desc-buf NAME u-dma-buf for SG descriptor rings (default \"udmabuf-ojls-desc\")\n"
             "  --timeout MS   per-image encode timeout (default 10000)\n"
             "  --loopback     no hardware; echo payloads back (protocol test)\n",
             argv0, OJLS_PROTO_PORT);
@@ -520,6 +533,8 @@ int main(int argc, char **argv)
             opt.tx_buf = argv[++i];
         else if (strcmp(argv[i], "--rx-buf") == 0 && i + 1 < argc)
             opt.rx_buf = argv[++i];
+        else if (strcmp(argv[i], "--desc-buf") == 0 && i + 1 < argc)
+            opt.desc_buf = argv[++i];
         else if (strcmp(argv[i], "--timeout") == 0 && i + 1 < argc)
             opt.timeout_ms = atoi(argv[++i]);
         else if (strcmp(argv[i], "--loopback") == 0)
