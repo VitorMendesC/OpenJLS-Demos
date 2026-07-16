@@ -2,7 +2,7 @@
 # Board-side (PYNQ-Z2, run as root): one-shot bring-up after a power cycle.
 #
 # Collapses the manual "On the board" sequence from
-# ../Hardware/pynq-z2/README.md (load PL -> apply overlay -> free CMA -> load
+# ../Hardware/pynq-z2/INTERNALS.md (load PL -> apply overlay -> free CMA -> load
 # u-dma-buf -> start server) into a single idempotent command. Safe to re-run:
 # it tears down what it owns (server, module, overlay) and rebuilds it.
 #
@@ -124,7 +124,7 @@ if [ "$ok" != 1 ]; then
   echo "!! a buffer failed to allocate — CMA too small or too fragmented:" >&2
   dmesg | grep -i -E 'cma_alloc|dma_alloc_coherent|u-dma-buf' | tail -8 >&2
   echo "   a reboot gives the cleanest pool; if it still fails, grow cma= —" >&2
-  echo "   see Hardware/pynq-z2/README.md ('Large images and the CMA pool')." >&2
+  echo "   see Hardware/pynq-z2/INTERNALS.md ('Large images and the CMA pool')." >&2
   exit 1
 fi
 
