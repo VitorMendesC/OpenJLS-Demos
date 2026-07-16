@@ -63,7 +63,7 @@ dma@40400000 {
 
 /* DMA buffers — pixels in, bitstream out, and the SG descriptor rings.
  * These come from the kernel CMA pool; sizes this large need the pool grown
- * on the kernel command line (e.g. cma=320M). See ../Hardware/pynq-z2/README.md. */
+ * on the kernel command line (e.g. cma=320M). See ../Hardware/pynq-z2/INTERNALS.md. */
 udmabuf-ojls-tx {
     compatible = "ikwzm,u-dma-buf";
     device-name = "udmabuf-ojls-tx";
