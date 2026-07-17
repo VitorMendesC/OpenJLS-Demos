@@ -1,5 +1,8 @@
 # Hardware-in-the-loop verification
 
+> The verification half of the [EncodeOverEthernet](../README.md) demo; run it
+> once the board is set up per that README.
+
 Drives the PYNQ-Z2 through the OpenJLS golden corpus, one encoder precision at a
 time, and byte-compares every hardware-encoded `.jls` against a CharLS
 reference — the **same oracle** the simulation golden model uses. A pass proves
