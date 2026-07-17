@@ -12,8 +12,9 @@ EncodeOverEthernet/Hardware/pynq-z2/build/
 # Compiled device tree overlays and bitstream artifacts (built on demand)
 *.dtbo
 *.bit.bin
-# ...except the per-bitness demo bitstreams, which are committed so the HIL
-# sweep can reload every depth on the board without a multi-hour re-synthesis.
-# They are build products kept in-tree for convenience; the Tcl stays the
-# source of truth.
+# ...except the per-bitness demo bitstreams and the shared overlay, which are
+# committed so the HIL sweep and a fresh clone can bring up the board without a
+# multi-hour re-synthesis (or even a local dtc). They are build products kept
+# in-tree for convenience; the Tcl and .dtso stay the source of truth.
 !EncodeOverEthernet/Hardware/pynq-z2/bitstreams/*.bit.bin
+!EncodeOverEthernet/Hardware/pynq-z2/openjls.dtbo
