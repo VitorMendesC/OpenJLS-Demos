@@ -155,8 +155,9 @@ in the order that matters.
 
 3. **UIO**: the PYNQ image normally boots with
    `uio_pdrv_genirq.of_id=generic-uio` already on the kernel command line —
-   check `grep generic-uio /proc/cmdline`. If it's missing, add it to the
-   bootargs, or `modprobe uio_pdrv_genirq of_id=generic-uio` when it's a module.
+   check `grep generic-uio /proc/cmdline`. If it's missing, `setup_bootargs.sh`
+   adds it to the bootargs (see [Large images and the CMA pool](#large-images-and-the-cma-pool)),
+   or `modprobe uio_pdrv_genirq of_id=generic-uio` when it's a module.
    Then:
 
    ```sh
@@ -178,17 +179,25 @@ in the order that matters.
    [ -w /proc/sys/vm/compact_memory ] && echo 1 > /proc/sys/vm/compact_memory
    ```
 
-5. **u-dma-buf** (out-of-tree module, needs the kernel headers package to
-   build):
+5. **u-dma-buf** — the DMA-buffer kernel module. The quickstart doesn't build
+   this on the board (the board may have no internet, and a `.ko` is tied to one
+   exact kernel anyway): a pre-built `u-dma-buf.ko` is committed next to this
+   file and `board_setup.sh` just loads it. It was built against the PYNQ image's
+   kernel, `6.6.10-xilinx-v2024.1-g3c0eca68c652` (its `vermagic`; check yours
+   with `uname -r`). `insmod` refuses a module whose `vermagic` doesn't match the
+   running kernel, so **rebuild it if you change the kernel or port to another
+   board** — that's the only time you need this:
 
    ```sh
+   # on a machine with this board's kernel headers (out-of-tree module)
    git clone https://github.com/ikwzm/udmabuf
-   cd udmabuf && make && insmod u-dma-buf.ko
-   ls /sys/class/u-dma-buf/  # expect udmabuf-ojls-{tx,rx,desc}
+   cd udmabuf && make          # -> u-dma-buf.ko ; commit/scp it in place
    ```
 
-   These buffers are large (128 + 176 MiB); if the `-tx`/`-rx` entries are
-   missing, the pool was too small or too fragmented — see below.
+   Confirm it loaded: `ls /sys/class/u-dma-buf/` should list
+   `udmabuf-ojls-{tx,rx,desc}`. These buffers are large (128 + 176 MiB); if the
+   `-tx`/`-rx` entries are missing, the pool was too small or too fragmented —
+   see below.
 
 6. **Run**:
 
@@ -239,9 +248,12 @@ so the encoder accepts images up to a **128 MiB raw** frame — comfortably past
 every image in the golden corpus. The buffers only allocate if the CMA pool is
 at least that big; the stock image defaults to `cma=128M`, which is too small.
 
-**Grow the pool** on the kernel command line (persistent). On the stock PYNQ SD
-card, edit the FAT `boot` partition's `uEnv.txt` (or the bootloader's
-`bootargs`) to add `cma=320M`, then reboot and confirm:
+**Grow the pool** on the kernel command line (persistent). `setup_bootargs.sh`
+does exactly this — it edits the `bootargs=` line in the FAT `boot` partition's
+`uEnv.txt` (which U-Boot imports at boot), seeding from the running command line
+so `root=…` is kept and adding `cma=320M` (and `generic-uio`) only if absent. To
+do it by hand, or to set a different size, edit that line to add `cma=320M`, then
+reboot and confirm:
 
 ```sh
 grep cma /proc/cmdline
