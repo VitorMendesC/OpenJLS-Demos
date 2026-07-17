@@ -1,0 +1,147 @@
+# EncodeOverEthernet
+
+Stream raw images to an FPGA board over TCP, encode them to JPEG-LS **entirely in
+hardware**, and stream the `.jls` files back. The CPU on the board only shuttles
+bytes between the socket and an AXI DMA — the encode itself is 100% the OpenJLS
+core in the PL.
+
+```
+┌─ host ───────┐            ┌─ board (PS) ─┐                     ┌─ board (PL) ──────┐
+│              │─── TCP ───►│              │─── AXI DMA MM2S ───►│                   │
+│ ojls_client  │            │ ojls_server  │◄─── AXI DMA S2MM ───│ openjls_axis_regs │
+│              │◄─── TCP ───│              │◄──── AXI-Lite ─────►│                   │
+│              │   (.jls)   │              │ dims, apply, status │                   │
+└──────────────┘            └──────────────┘                     └───────────────────┘
+```
+
+The demo has two halves, and this README is the one place that sets up **both**
+end to end. Each step links down to the reference doc that owns its detail:
+
+* **Software** — two portable C programs from one `Software/` tree: `ojls_server`
+  (board) and `ojls_client` (host). Board-agnostic; reference:
+  [`Software/README.md`](Software/README.md).
+* **Hardware** — the FPGA bitstream, device-tree overlay, and DMA module. Board-
+  specific; a PYNQ-Z2 (Zynq-7020) build is provided under
+  [`Hardware/pynq-z2/`](Hardware/pynq-z2/README.md), with design rationale and a
+  porting guide in [`INTERNALS.md`](Hardware/pynq-z2/INTERNALS.md).
+
+## What you build, and where each piece runs
+
+| Piece | Where it comes from | Runs on |
+|---|---|---|
+| `ojls_client` | you build it (`make`, host) | your host |
+| `ojls_server` | you build it (cross-compiled on the host, or `make` on the board) | the board |
+| bitstream `encode_eth_openjls_b<N>.bit.bin` (one per pixel depth `N`) | prebuilt, committed in the repo | board PL |
+| `openjls.dtbo` overlay | prebuilt, committed in the repo | board (device tree) |
+| `u-dma-buf.ko` | prebuilt, committed in the repo | board (kernel module) |
+
+Only the two C programs are yours to build — the FPGA bitstreams and overlay are
+committed pre-built, so **you don't need Vivado or the hardware toolchain to run
+the demo**. (Rebuilding them is a reference task, not part of setup:
+[`Hardware/pynq-z2/README.md`](Hardware/pynq-z2/README.md).)
+
+## Setup, end to end
+
+Setup starts at the software (the FPGA artifacts are already built, above). Each
+step below says where it runs, and host and board commands are kept in separate
+blocks. `<N>` is the encoder pixel depth (8..16) — start with **8**. The linked
+reference docs carry the full options and troubleshooting.
+
+## 1. Build the software
+
+**On the host** — one Makefile builds both programs; the board runs `ojls_server`.
+
+Cross-compile the server for the board (a PYNQ-Z2 is 32-bit ARM / Zynq-7000):
+
+```sh
+cd Software
+make ojls_client
+make CROSS_COMPILE=arm-linux-gnueabihf- ojls_server
+```
+
+Building the two targets separately keeps each binary for its own architecture — a
+bare `make` builds *both* for whichever machine runs it. For a 64-bit ARM board
+use `aarch64-linux-gnu-`; to build the server natively on the board instead, run
+`make ojls_server` there. Protocol, block-design requirements, and the porting
+checklist: [`Software/README.md`](Software/README.md).
+
+## 2. First-time board setup
+
+**On the host and board** — once per board; persists across reboots, so
+`board_setup.sh` doesn't redo it.
+
+Two things must be on the kernel command line: `uio_pdrv_genirq.of_id=generic-uio`
+(binds the UIO register nodes) and `cma=320M` (the stock 128 MiB CMA pool is too
+small for the DMA buffers, and bring-up fails without it). `setup_bootargs.sh`
+adds whichever is missing to `/boot/uEnv.txt`, seeding from the running command
+line so `root=…` is preserved; it's idempotent. On the host, copy it and the
+`Software/` tree (with the `ojls_server` from step 1) over:
+
+```sh
+BOARD=xilinx@192.168.3.1
+scp Hardware/pynq-z2/setup_bootargs.sh "$BOARD:~/"
+scp -r Software "$BOARD:~/"
+```
+
+Then on the board, set the kernel command line and reboot for it to take effect:
+
+```sh
+sudo ./setup_bootargs.sh && sudo reboot
+```
+
+(`/boot/uEnv.txt` is the Xilinx/PYNQ U-Boot mechanism; another OS image may carry
+kernel args elsewhere, e.g. `cmdline.txt` or an `extlinux.conf`.) The prebuilt
+`u-dma-buf.ko` and the overlay ship ready to copy (step 3) — no build, no internet
+on the board. Why `cma=320M`, and how to size it for larger images:
+[`INTERNALS.md`](Hardware/pynq-z2/INTERNALS.md).
+
+## 3. Flash and bring the board up
+
+**On the host and board** — each boot.
+
+On the host, copy the bitstream folder (`-r` ships every committed depth, b8..b16),
+the overlay, the DMA module, and the bring-up script:
+
+```sh
+BOARD=xilinx@192.168.3.1
+scp -r Hardware/pynq-z2/bitstreams "$BOARD:~/"
+scp Hardware/pynq-z2/openjls.dtbo Hardware/pynq-z2/u-dma-buf.ko "$BOARD:~/"
+scp Verification/board_setup.sh "$BOARD:~/"
+```
+
+`board_setup.sh <N>` loads the depth-`<N>` bitstream, so `<N>` must match the
+pixel depth of the images you'll send. On the board, as root:
+
+```sh
+sudo env HOME=$HOME ./board_setup.sh 8
+```
+
+It loads the PL, applies the overlay, frees the CMA pool, loads `u-dma-buf`,
+verifies the buffers, and starts the server — idempotent, safe to re-run.
+
+## 4. Encode
+
+**On the host**
+
+```sh
+./Software/ojls_client <board-ip> image.pgm
+```
+
+Writes `image.jls` next to the input.
+
+## Verifying it
+
+**On the host** — the sweep drives the board over ssh itself.
+
+To prove the hardware output is byte-exact against a reference JPEG-LS encoder
+(CharLS) across every pixel depth, run the hardware-in-the-loop sweep in
+[`Verification/`](Verification/README.md).
+
+## Reference docs
+
+| Doc | Covers |
+|---|---|
+| [`Software/README.md`](Software/README.md) | build details, wire protocol, block-design requirements, software porting checklist |
+| [`Hardware/pynq-z2/README.md`](Hardware/pynq-z2/README.md) | scripted board build-and-flash quickstart |
+| [`Hardware/pynq-z2/INTERNALS.md`](Hardware/pynq-z2/INTERNALS.md) | design rationale, manual bring-up, porting to another board |
+| [`Verification/README.md`](Verification/README.md) | byte-exact-vs-CharLS hardware sweep |
