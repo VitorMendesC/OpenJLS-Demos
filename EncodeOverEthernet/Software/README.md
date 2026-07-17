@@ -15,14 +15,25 @@ device tree job, not a software one.
 
 ## Building
 
+One Makefile builds both programs; you need `ojls_client` on your host and
+`ojls_server` on the board. Each side runs `make` and ignores the binary it
+doesn't use:
+
 ```sh
-make                                      # native (host tools, or directly on the board)
-make CROSS_COMPILE=arm-linux-gnueabihf-   # cross for 32-bit ARM (e.g. Zynq-7000)
-make CROSS_COMPILE=aarch64-linux-gnu-     # cross for 64-bit ARM (e.g. Zynq UltraScale+)
+make            # on your host  -> ojls_client (native)
+make            # on the board  -> ojls_server (native; a PYNQ image has gcc)
 ```
 
-Any C11 compiler + POSIX libc works. On a PYNQ image you can simply `make`
-on the board itself.
+If the board has no toolchain (or no time to compile), cross-compile the server
+on your host instead of the board-side `make`, then copy it over:
+
+```sh
+make CROSS_COMPILE=arm-linux-gnueabihf-   # 32-bit ARM (Zynq-7000)   -> scp ojls_server to the board
+make CROSS_COMPILE=aarch64-linux-gnu-     # 64-bit ARM (Zynq UltraScale+)
+```
+
+Any C11 compiler + POSIX libc works — there's nothing board-specific in the
+source. See the [demo README](../README.md) for how this fits the full setup.
 
 ## What the block design must provide
 
@@ -85,10 +96,12 @@ Two gotchas:
 
 * `generic-uio` only binds if the kernel command line (or a modprobe config)
   contains `uio_pdrv_genirq.of_id=generic-uio`.
-* `u-dma-buf` is an out-of-tree module — build it once for your kernel from
-  <https://github.com/ikwzm/udmabuf> and `insmod`/`modprobe` it before
-  starting the server. The server opens `udmabuf-ojls-{tx,rx,desc}` by name;
-  override any of them with `--tx-buf`/`--rx-buf`/`--desc-buf`.
+* `u-dma-buf` is an out-of-tree module. The PYNQ-Z2 build ships a prebuilt
+  `u-dma-buf.ko` (in `Hardware/pynq-z2/`) you just copy to the board; for a
+  different kernel, build one from <https://github.com/ikwzm/udmabuf> and
+  `insmod`/`modprobe` it before starting the server. The server opens
+  `udmabuf-ojls-{tx,rx,desc}` by name; override any with
+  `--tx-buf`/`--rx-buf`/`--desc-buf`.
 
 ## Running
 
