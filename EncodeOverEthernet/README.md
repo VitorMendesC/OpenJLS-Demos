@@ -90,7 +90,9 @@ sudo ./setup_bootargs.sh && sudo reboot
 ```
 
 (`/boot/uEnv.txt` is the Xilinx/PYNQ U-Boot mechanism; another OS image may carry
-kernel args elsewhere, e.g. `cmdline.txt` or an `extlinux.conf`.) The prebuilt
+kernel args elsewhere, e.g. `cmdline.txt` or an `extlinux.conf`. Note `/boot` is
+the SD card's small FAT partition — `mmcblk0p1`, mounted at `/boot` on the board —
+not part of the rootfs, so look for the file there if you mount the card on a PC.) The prebuilt
 `u-dma-buf.ko` and the overlay ship ready to copy (step 3) — no build, no internet
 on the board. Why `cma=320M`, and how to size it for larger images:
 [`INTERNALS.md`](Hardware/pynq-z2/INTERNALS.md).
@@ -128,6 +130,13 @@ verifies the buffers, and starts the server — idempotent, safe to re-run.
 ```
 
 Writes `image.jls` next to the input.
+
+Any binary PGM (P5) works — its depth must match the loaded bitstream (8-bit
+for BITNESS 8). No image handy? Generate a test gradient:
+
+```sh
+python3 -c 'w,h=640,480;open("image.pgm","wb").write(b"P5\n%d %d\n255\n"%(w,h)+bytes((x^y)&255 for y in range(h) for x in range(w)))'
+```
 
 ## Verifying it
 

@@ -100,22 +100,33 @@ buffers_ok() {          # all three nodes present?
   return 0
 }
 
-echo "=== 5. load u-dma-buf (with one compact-and-retry on fragmentation) ==="
+echo "=== 5. load u-dma-buf (retrying while the CMA pool settles) ==="
+# Right after boot, jupyter shutdown and dirty writeback can leave transiently
+# pinned pages in the CMA region (cma_alloc ret -16 / EBUSY) that drop_caches
+# can't evict yet. A single quick retry often loses that race; escalating
+# waits (1 s, 4 s, 8 s) reliably win it on the stock image.
 free_cma
 insmod "$module"; sleep 0.5
-if ! buffers_ok; then
-  echo "  (a buffer missed — compacting CMA and retrying once)"
+for wait in 1 4 8; do
+  buffers_ok && break
+  echo "  (a buffer missed — waiting ${wait}s for pinned pages, then retrying)"
   rmmod u-dma-buf 2>/dev/null || true
+  sleep "$wait"
   free_cma
   insmod "$module"; sleep 0.5
-fi
+done
 
 echo "=== 6. verify all three buffers allocated ==="
 ok=1
 for name in tx rx desc; do
   d="/sys/class/u-dma-buf/udmabuf-ojls-$name"
   if [ -d "$d" ]; then
-    printf "  %-22s %d MiB\n" "udmabuf-ojls-$name" "$(( $(cat "$d/size") / 1048576 ))"
+    size=$(cat "$d/size")
+    if [ "$size" -ge 1048576 ]; then
+      printf "  %-22s %d MiB\n" "udmabuf-ojls-$name" "$(( size / 1048576 ))"
+    else
+      printf "  %-22s %d KiB\n" "udmabuf-ojls-$name" "$(( size / 1024 ))"
+    fi
   else
     echo "  udmabuf-ojls-$name  MISSING"; ok=0
   fi

@@ -8,6 +8,8 @@ EncodeOverEthernet/Software/ojls_client
 *.str
 .Xil/
 EncodeOverEthernet/Hardware/pynq-z2/build/
+# The PS7 IP writes its config summary to a literal `NA/` when no path is set
+EncodeOverEthernet/Hardware/pynq-z2/NA/
 
 # Compiled device tree overlays and bitstream artifacts (built on demand)
 *.dtbo

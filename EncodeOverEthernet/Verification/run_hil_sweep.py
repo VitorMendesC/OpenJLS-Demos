@@ -220,6 +220,10 @@ def preflight(args):
         problems.append(
             f"charls-cli not built at {CHARLS}\n"
             f"    build it: '{OJLS}/ThirdParty/fetch_third_party.sh' charls")
+    if not (os.path.exists(GATE_PGM) and os.path.exists(GATE_JLS)):
+        problems.append(
+            f"CharLS trust-gate vectors missing (T16E0.JLS and its source PGM)\n"
+            f"    fetch them: '{OJLS}/Verification/T87 conformance/fetch_reference_images.sh'")
     if not (os.path.exists(CLIENT) and os.access(CLIENT, os.X_OK)):
         problems.append(
             f"ojls_client not built at {CLIENT}\n"
