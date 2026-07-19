@@ -774,15 +774,9 @@ proc create_root_design { parentCell } {
 
   # Create instance: openjls_axis_regs_0, and set properties
   set openjls_axis_regs_0 [ create_bd_cell -type ip -vlnv vitormendescamilo:openjls:openjls_axis_regs:1.0 openjls_axis_regs_0 ]
-  set_property -dict [list \
-    CONFIG.BITNESS {8} \
-    CONFIG.MAX_IMAGE_HEIGHT {65535} \
-    CONFIG.MAX_IMAGE_WIDTH {65535} \
-  ] $openjls_axis_regs_0
-
 
   # Create interface connections
-  connect_bd_intf_net -intf_net axi_dma_0_M_AXIS_MM2S [get_bd_intf_pins openjls_axis_regs_0/s_axis_pixel] [get_bd_intf_pins axi_dma_0/M_AXIS_MM2S]
+  connect_bd_intf_net -intf_net axi_dma_0_M_AXIS_MM2S [get_bd_intf_pins axi_dma_0/M_AXIS_MM2S] [get_bd_intf_pins openjls_axis_regs_0/s_axis_pixel]
   connect_bd_intf_net -intf_net axi_dma_0_M_AXI_MM2S [get_bd_intf_pins axi_dma_0/M_AXI_MM2S] [get_bd_intf_pins axi_mem_intercon/S00_AXI]
   connect_bd_intf_net -intf_net axi_dma_0_M_AXI_S2MM [get_bd_intf_pins axi_dma_0/M_AXI_S2MM] [get_bd_intf_pins axi_mem_intercon/S01_AXI]
   connect_bd_intf_net -intf_net axi_dma_0_M_AXI_SG [get_bd_intf_pins axi_dma_0/M_AXI_SG] [get_bd_intf_pins axi_mem_intercon/S02_AXI]
