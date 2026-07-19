@@ -35,20 +35,19 @@ if {[catch {set_property BOARD_PART tul.com.tw:pynq-z2:part0:1.0 [current_projec
     puts "WARNING: PYNQ-Z2 board files not installed, continuing with bare part: $err"
 }
 
-# OpenJLS RTL + AXI wrappers (VHDL-2008, default library), then the
-# open-logic primitives they instantiate, via the core's own script.
-set ojls_files [concat \
-    [glob [file join $openjls_dir Sources *.vhd]] \
-    [glob [file join $openjls_dir Sources axi *.vhd]]]
-add_files -fileset sources_1 $ojls_files
-set_property FILE_TYPE {VHDL 2008} [get_files $ojls_files]
-source [file join $openjls_dir Scripts create_libraries_vivado.tcl]
-# BD module references don't support VHDL-2008 sources: with the 2008 file
-# type, can_resolve_reference fails and the BD script bails out leaving an
-# empty design. openjls_axis_regs is written to also parse as VHDL-93, so
-# only this one file gets the plain type; everything below it stays 2008.
-set_property FILE_TYPE VHDL [get_files [file join $openjls_dir Sources axi openjls_axis_regs.vhd]]
-update_compile_order -fileset sources_1
+# The encoder now comes in as packaged IP (vitormendescamilo:openjls:*:1.0)
+# from the submodule's committed IP repo. The cores are self-contained (OpenJLS
+# RTL + the open-logic primitives bundled under each core's src/), so no raw
+# RTL is added here and create_libraries_vivado.tcl is no longer sourced —
+# which also retires the old VHDL-2008 vs module-reference FILE_TYPE dance.
+set ip_repo [file join $openjls_dir Sources Xilinx ip_repo]
+if {![file isdirectory $ip_repo]} {
+    error "Packaged IP repo not found at $ip_repo — update the ThirdParty/OpenJLS\
+           submodule (needs OpenJLS commit 8f93507 \"Package the AXI wrappers as\
+           Vivado IP cores\" or later)."
+}
+set_property ip_repo_paths $ip_repo [current_project]
+update_ip_catalog -rebuild
 
 # Block design, then its HDL wrapper as top. All I/O is through the PS
 # (DDR/FIXED_IO), so there is no XDC.
