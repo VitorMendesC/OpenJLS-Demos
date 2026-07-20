@@ -85,10 +85,14 @@ script, the overlay, and the `Software/` tree (with the `ojls_server` from
 step 1) over:
 
 ```sh
-BOARD=xilinx@192.168.2.99
+BOARD=xilinx@192.168.2.99          # PYNQ's stock static IP
+ssh-copy-id "$BOARD"               # once; the sweep in "Verifying it" needs key auth
 scp Hardware/pynq-z2/setup_bootargs.sh Hardware/pynq-z2/openjls.dtbo "$BOARD:~/"
 scp -r Software "$BOARD:~/"
 ```
+
+(The stock PYNQ password is `xilinx` — `ssh-copy-id` asks for it once and every
+later ssh/scp step is prompt-free.)
 
 Then on the board, set the kernel command line and reboot for it to take effect:
 

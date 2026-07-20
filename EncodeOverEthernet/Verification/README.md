@@ -60,7 +60,8 @@ first if it's empty:
   `ThirdParty/OpenJLS/Verification/T87 conformance/fetch_reference_images.sh`.
 - **Client** — `make -C ../Software ojls_client`.
 - **Bitstreams** — `../Hardware/pynq-z2/build_all_bitness.sh`.
-- **Board** — reachable over ssh with **key-based** auth, the demo `Software/`
+- **Board** — reachable over ssh with **key-based** auth (once:
+  `ssh-copy-id xilinx@192.168.2.99`, stock password `xilinx`), the demo `Software/`
   built there (`ojls_server`), the first-time boot setup done
   (`../Hardware/pynq-z2/setup_bootargs.sh` + reboot), and brought up once with
   `board_setup.sh` (loads PL + `u-dma-buf`, starts the server; see
@@ -73,11 +74,11 @@ first if it's empty:
 # Preview the corpus precision histogram and check prerequisites — no board:
 ./run_hil_sweep.py --dry-run
 
-# Full sweep:
-BOARD=xilinx@192.168.2.99 SUDO_PASS=xilinx ./run_hil_sweep.py
+# Full sweep (defaults to BOARD=xilinx@192.168.2.99, SUDO_PASS=xilinx):
+./run_hil_sweep.py
 
 # Subset of depths, few images each (smoke test):
-BOARD=xilinx@192.168.2.99 SUDO_PASS=xilinx ./run_hil_sweep.py --bitness 8 12 --limit 5
+./run_hil_sweep.py --bitness 8 12 --limit 5
 ```
 
 Exit status is non-zero if any image mismatched or errored. Per-image results
@@ -85,6 +86,8 @@ land in `out/results.csv`; encoded outputs and cached goldens under `out/`
 (git-ignored).
 
 Configuration is entirely via environment — see the header of
-`run_hil_sweep.py` for every variable and its default. Key ones: `BOARD`,
-`SUDO_PASS`, `SSH_KEY`, `BITSTREAM_DIR`/`IMAGES_DIR`/`CHARLS`/`CLIENT` overrides,
+`run_hil_sweep.py` for every variable and its default. Key ones: `BOARD` /
+`SUDO_PASS` (default to the standard bench setup above; set a different target
+or `BOARD=` empty for dry-run-only), `SSH_KEY`,
+`BITSTREAM_DIR`/`IMAGES_DIR`/`CHARLS`/`CLIENT` overrides,
 and `TX_BYTES` (images larger than the board tx buffer are skipped, not failed).
