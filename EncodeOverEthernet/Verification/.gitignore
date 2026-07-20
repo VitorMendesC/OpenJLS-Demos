@@ -1,5 +1,6 @@
 # Sweep scratch: encoded outputs, cached CharLS goldens, results.csv
 out/
+!out/results.csv
 
 # Python bytecode from importing the driver
 __pycache__/
