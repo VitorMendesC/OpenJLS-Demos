@@ -72,15 +72,17 @@ checklist: [`Software/README.md`](Software/README.md).
 **On the host and board** — once per board; persists across reboots, so
 `board_setup.sh` doesn't redo it.
 
-`setup_bootargs.sh` makes two persistent changes. It puts
+`setup_bootargs.sh` makes three persistent changes. It puts
 `uio_pdrv_genirq.of_id=generic-uio` on the kernel command line in
-`/boot/uEnv.txt` (binds the UIO register nodes), seeding from the running
-command line so `root=…` is preserved. And it installs `openjls.dtbo` plus a
-U-Boot `uenvcmd` that applies it to the device tree **at boot** — that overlay
-carves out an exclusive reserved-memory region for the DMA buffers, which the
-kernel must see at early boot (a runtime overlay would be too late to reserve
-anything). It's idempotent, and if the boot-time apply ever fails U-Boot falls
-through to a stock boot — it can't brick the board. On the host, copy the
+`/boot/uEnv.txt` (binds the UIO register nodes) and pins `cma=128M`, seeding
+from the running command line so `root=…` is preserved. It installs
+`openjls.dtbo` plus a U-Boot `uenvcmd` that applies it to the device tree
+**at boot** — that overlay carves out an exclusive reserved-memory region for
+the DMA buffers, which the kernel must see at early boot (a runtime overlay
+would be too late to reserve anything). And it caps U-Boot's fdt/initrd
+relocation below the carveout so the patched DTB can't land inside it. It's
+idempotent, and if the boot-time apply ever fails U-Boot falls through to a
+stock boot — it can't brick the board. On the host, copy the
 script, the overlay, and the `Software/` tree (with the `ojls_server` from
 step 1) over:
 
@@ -105,7 +107,9 @@ kernel args elsewhere, e.g. `cmdline.txt` or an `extlinux.conf`. Note `/boot` is
 the SD card's small FAT partition — `mmcblk0p1`, mounted at `/boot` on the board —
 not part of the rootfs, so look for the file there if you mount the card on a PC.) The prebuilt
 `u-dma-buf.ko` ships ready to copy (step 3) — no build, no internet on the
-board. Why a reserved-memory carveout rather than CMA, and how to size it for
+board — but it is built against the stock image's kernel; if `uname -r` on your
+board differs, rebuild it first
+([`Hardware/pynq-z2/README.md`](Hardware/pynq-z2/README.md)). Why a reserved-memory carveout rather than CMA, and how to size it for
 larger images: [`INTERNALS.md`](Hardware/pynq-z2/INTERNALS.md).
 
 ## 3. Flash and bring the board up
@@ -169,7 +173,16 @@ ThirdParty/OpenJLS/ThirdParty/fetch_third_party.sh charls          # reference e
 "ThirdParty/OpenJLS/Verification/Golden model/prepare_images.sh"   # image corpus (fetches + normalizes to grayscale PGM)
 ```
 
-The sweep's `--dry-run` preflight checks all of these and prints the exact
+Then run the sweep (it targets `xilinx@192.168.2.99` by default; override with
+`BOARD=`):
+
+```sh
+cd Verification
+./run_hil_sweep.py --dry-run   # preflight only — board, ssh keys, corpus, CharLS
+./run_hil_sweep.py             # full sweep, every committed depth
+```
+
+The `--dry-run` preflight checks all of the above and prints the exact
 command for anything missing.
 
 The encoder IP is synthesized with a maximum image size (**65535 x 65535** in

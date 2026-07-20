@@ -1,21 +1,27 @@
 # OpenJLS-Demos
 
 Demo projects for [OpenJLS](https://github.com/VitorMendesC/OpenJLS), the
-open-source JPEG-LS (ITU-T T.87) hardware encoder. Each project lives in its
-own directory; the encoder core is shared by all of them as a submodule
-pinned at the verified commit.
+open-source JPEG-LS (ITU-T T.87) hardware encoder. Each demo lives in its own
+directory with a self-contained, end-to-end README — software, hardware
+bring-up, and verification; the encoder core is shared by all of them as a
+submodule pinned at the verified commit.
 
 ## Projects
 
 | Path | Project |
 |---|---|
-| [`EncodeOverEthernet/`](EncodeOverEthernet/) | Stream raw images to a board over Ethernet, encode them in the FPGA, stream the `.jls` files back. |
+| [`EncodeOverEthernet/`](EncodeOverEthernet/README.md) | Stream raw images to a board over Ethernet, encode them 100% in the FPGA, stream the `.jls` files back. A PYNQ-Z2 build is provided; other boards get sibling directories. |
 | `ThirdParty/OpenJLS` | The encoder core (submodule), used by every project. |
 
-## EncodeOverEthernet
+## Results
 
-Stream raw images to a board over TCP, encode them 100% in the FPGA, stream the
-`.jls` files back. The [`EncodeOverEthernet/`](EncodeOverEthernet/README.md)
-README is the single end-to-end setup guide — it stands up both the software
-(portable C client + server) and the hardware (a PYNQ-Z2 build is provided,
-other boards get sibling directories) and links to the per-part reference docs.
+Verified in hardware on a PYNQ-Z2: across the full verification corpus —
+**287 images spanning every supported pixel depth (8–16 bits)** — the FPGA
+output is **byte-exact against the CharLS reference encoder**, with zero
+mismatches. Losslessly compressed, the 581 MB corpus comes back as 356 MB
+(1.63:1 overall; ratio is content-dependent).
+
+The hardware-in-the-loop sweep that produces these numbers is fully
+reproducible — see
+[`EncodeOverEthernet/README.md`](EncodeOverEthernet/README.md), which walks
+from a clean clone to a verified board.
