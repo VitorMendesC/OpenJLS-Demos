@@ -60,7 +60,9 @@ make CROSS_COMPILE=arm-linux-gnueabihf- ojls_server
 ```
 
 Building the two targets separately keeps each binary for its own architecture — a
-bare `make` builds *both* for whichever machine runs it. For a 64-bit ARM board
+bare `make` builds *both* for whichever machine runs it. The cross compiler is
+your distro's ARM hard-float toolchain package (`gcc-arm-linux-gnueabihf` on
+Debian/Ubuntu, `arm-linux-gnueabihf-gcc` on Arch/AUR). For a 64-bit ARM board
 use `aarch64-linux-gnu-`; to build the server natively on the board instead, run
 `make ojls_server` there. Protocol, block-design requirements, and the porting
 checklist: [`Software/README.md`](Software/README.md).
@@ -70,16 +72,21 @@ checklist: [`Software/README.md`](Software/README.md).
 **On the host and board** — once per board; persists across reboots, so
 `board_setup.sh` doesn't redo it.
 
-Two things must be on the kernel command line: `uio_pdrv_genirq.of_id=generic-uio`
-(binds the UIO register nodes) and `cma=320M` (the stock 128 MiB CMA pool is too
-small for the DMA buffers, and bring-up fails without it). `setup_bootargs.sh`
-adds whichever is missing to `/boot/uEnv.txt`, seeding from the running command
-line so `root=…` is preserved; it's idempotent. On the host, copy it and the
-`Software/` tree (with the `ojls_server` from step 1) over:
+`setup_bootargs.sh` makes two persistent changes. It puts
+`uio_pdrv_genirq.of_id=generic-uio` on the kernel command line in
+`/boot/uEnv.txt` (binds the UIO register nodes), seeding from the running
+command line so `root=…` is preserved. And it installs `openjls.dtbo` plus a
+U-Boot `uenvcmd` that applies it to the device tree **at boot** — that overlay
+carves out an exclusive reserved-memory region for the DMA buffers, which the
+kernel must see at early boot (a runtime overlay would be too late to reserve
+anything). It's idempotent, and if the boot-time apply ever fails U-Boot falls
+through to a stock boot — it can't brick the board. On the host, copy the
+script, the overlay, and the `Software/` tree (with the `ojls_server` from
+step 1) over:
 
 ```sh
-BOARD=xilinx@192.168.3.1
-scp Hardware/pynq-z2/setup_bootargs.sh "$BOARD:~/"
+BOARD=xilinx@192.168.2.99
+scp Hardware/pynq-z2/setup_bootargs.sh Hardware/pynq-z2/openjls.dtbo "$BOARD:~/"
 scp -r Software "$BOARD:~/"
 ```
 
@@ -93,21 +100,21 @@ sudo ./setup_bootargs.sh && sudo reboot
 kernel args elsewhere, e.g. `cmdline.txt` or an `extlinux.conf`. Note `/boot` is
 the SD card's small FAT partition — `mmcblk0p1`, mounted at `/boot` on the board —
 not part of the rootfs, so look for the file there if you mount the card on a PC.) The prebuilt
-`u-dma-buf.ko` and the overlay ship ready to copy (step 3) — no build, no internet
-on the board. Why `cma=320M`, and how to size it for larger images:
-[`INTERNALS.md`](Hardware/pynq-z2/INTERNALS.md).
+`u-dma-buf.ko` ships ready to copy (step 3) — no build, no internet on the
+board. Why a reserved-memory carveout rather than CMA, and how to size it for
+larger images: [`INTERNALS.md`](Hardware/pynq-z2/INTERNALS.md).
 
 ## 3. Flash and bring the board up
 
 **On the host and board** — each boot.
 
 On the host, copy the bitstream folder (`-r` ships every committed depth, b8..b16),
-the overlay, the DMA module, and the bring-up script:
+the DMA module, and the bring-up script:
 
 ```sh
-BOARD=xilinx@192.168.3.1
+BOARD=xilinx@192.168.2.99
 scp -r Hardware/pynq-z2/bitstreams "$BOARD:~/"
-scp Hardware/pynq-z2/openjls.dtbo Hardware/pynq-z2/u-dma-buf.ko "$BOARD:~/"
+scp Hardware/pynq-z2/u-dma-buf.ko "$BOARD:~/"
 scp Verification/board_setup.sh "$BOARD:~/"
 ```
 
@@ -118,8 +125,9 @@ pixel depth of the images you'll send. On the board, as root:
 sudo env HOME=$HOME ./board_setup.sh 8
 ```
 
-It loads the PL, applies the overlay, frees the CMA pool, loads `u-dma-buf`,
-verifies the buffers, and starts the server — idempotent, safe to re-run.
+It loads the PL, verifies the boot-time overlay and its DMA carveout are live
+(pointing you back at step 2 if not), loads `u-dma-buf`, verifies the buffers,
+and starts the server — idempotent, safe to re-run.
 
 ## 4. Encode
 
@@ -145,6 +153,25 @@ python3 -c 'w,h=640,480;open("image.pgm","wb").write(b"P5\n%d %d\n255\n"%(w,h)+b
 To prove the hardware output is byte-exact against a reference JPEG-LS encoder
 (CharLS) across every pixel depth, run the hardware-in-the-loop sweep in
 [`Verification/`](Verification/README.md).
+
+The image corpus, the CharLS reference encoder, and the T.87 trust vectors live
+in the `ThirdParty/OpenJLS` submodule — clone with `--recursive`, or initialize
+it and build them once (from the repo root):
+
+```sh
+git submodule update --init --recursive
+ThirdParty/OpenJLS/ThirdParty/fetch_third_party.sh charls          # reference encoder
+"ThirdParty/OpenJLS/Verification/T87 conformance/fetch_reference_images.sh"
+"ThirdParty/OpenJLS/Verification/Golden model/prepare_images.sh"   # image corpus (fetches + normalizes to grayscale PGM)
+```
+
+The sweep's `--dry-run` preflight checks all of these and prints the exact
+command for anything missing.
+
+The encoder IP is synthesized with a maximum image size (**65535 x 65535** in
+the shipped block design); the server reads the exact limits from the `MAXDIM`
+register and rejects anything larger, and the sweep skips such images rather
+than reporting them as failures.
 
 ## Reference docs
 

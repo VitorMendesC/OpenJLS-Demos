@@ -73,22 +73,51 @@ dma@40400000 {
 };
 
 /* DMA buffers — pixels in, bitstream out, and the SG descriptor rings.
- * These come from the kernel CMA pool; sizes this large need the pool grown
- * on the kernel command line (e.g. cma=320M). See ../Hardware/pynq-z2/INTERNALS.md. */
+ * Each node draws from its own exclusive reserved-memory carveout
+ * (`shared-dma-pool` + `no-map`), so allocation is deterministic — no CMA
+ * sizing or fragmentation. The catch: the kernel only honors reserved-memory
+ * it sees at EARLY boot, so the overlay must be applied by the bootloader
+ * (U-Boot), not at runtime — a configfs overlay would reserve nothing.
+ * Keep each size a power of two, matching its pool.
+ * See ../Hardware/pynq-z2/INTERNALS.md and openjls.dtso for the boot flow. */
+reserved-memory {
+    #address-cells = <1>; #size-cells = <1>; ranges;
+    ojls_tx_pool: ojls-tx@10000000 {
+        compatible = "shared-dma-pool";
+        reg = <0x10000000 0x08000000>;  /* 128 MiB: max input image raw size */
+        no-map;
+    };
+    ojls_rx_pool: ojls-rx@18000000 {
+        compatible = "shared-dma-pool";
+        reg = <0x18000000 0x08000000>;  /* 128 MiB: worst-case output is raw
+                                           +25% + slack, so effective max
+                                           input is ~102 MiB */
+        no-map;
+    };
+    ojls_desc_pool: ojls-desc@ffc0000 {
+        compatible = "shared-dma-pool";
+        reg = <0x0FFC0000 0x00040000>;  /* 256 KiB: SG descriptor rings */
+        no-map;
+    };
+};
+
 udmabuf-ojls-tx {
     compatible = "ikwzm,u-dma-buf";
     device-name = "udmabuf-ojls-tx";
-    size = <0x08000000>;  /* 128 MiB: max input image raw size */
+    size = <0x08000000>;
+    memory-region = <&ojls_tx_pool>;
 };
 udmabuf-ojls-rx {
     compatible = "ikwzm,u-dma-buf";
     device-name = "udmabuf-ojls-rx";
-    size = <0x0b000000>;  /* 176 MiB: raw size + 25% + slack for incompressible input */
+    size = <0x08000000>;
+    memory-region = <&ojls_rx_pool>;
 };
 udmabuf-ojls-desc {
     compatible = "ikwzm,u-dma-buf";
     device-name = "udmabuf-ojls-desc";
-    size = <0x00040000>;  /* 256 KiB: SG descriptor rings */
+    size = <0x00040000>;
+    memory-region = <&ojls_desc_pool>;
 };
 ```
 
@@ -152,7 +181,8 @@ byte/pixel for bitness 8 and 2 bytes/pixel for 9–16. Response payload: the
 2. Write the device tree overlay with your addresses; keep `openjls` and
    `dma` in the node names, or pass `--regs`/`--dma` instead.
 3. Build and load u-dma-buf for your kernel; add the three buffer nodes
-   (tx/rx/desc), sized to your CMA pool.
+   (tx/rx/desc), each backed by its own reserved-memory carveout, and make
+   sure your bootloader applies the overlay at boot.
 4. `make` on the board (or cross-compile) and run `ojls_server`.
 
 Nothing in `Software/` should need changes — if it does, that's a bug worth

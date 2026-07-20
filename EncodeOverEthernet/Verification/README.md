@@ -35,19 +35,23 @@ device-tree overlay and `u-dma-buf` are precision-independent and stay loaded.
 | file | runs on | what |
 |---|---|---|
 | `run_hil_sweep.py` | host | orchestrator: preflight, CharLS gate, bucket, per-depth reload + encode + compare, report |
-| `board_setup.sh`   | board | **one-shot bring-up after a power cycle**: load PL + overlay, free CMA, load `u-dma-buf`, verify buffers, start server |
+| `board_setup.sh`   | board | **one-shot bring-up after a power cycle**: load PL, verify the boot-time overlay + DMA carveout, load `u-dma-buf`, verify buffers, start server |
 | `board_reload.sh`  | board | lighter per-depth path: reload a depth's bitstream + restart the server (copied over by the driver) |
 
 `board_setup.sh` is the whole board-side bring-up (documented step by step in
 `../Hardware/pynq-z2/INTERNALS.md`) collapsed into one idempotent command — run
-it once after each boot and the board is ready. `board_reload.sh` is what the
-sweep calls between depths, when the overlay and `u-dma-buf` are already up and
-only the PL image and server need to cycle.
+it once after each boot and the board is ready. (The device-tree overlay itself
+is applied by U-Boot at boot — installed once per board by
+`../Hardware/pynq-z2/setup_bootargs.sh`; `board_setup.sh` verifies it rather
+than applying it.) `board_reload.sh` is what the sweep calls between depths,
+when `u-dma-buf` is already up and only the PL image and server need to cycle.
 
 ## Prerequisites
 
 Produced by the core / demo, checked by the driver's preflight (which prints the
-exact command for anything missing):
+exact command for anything missing). The first three live in the
+`ThirdParty/OpenJLS` submodule — `git submodule update --init --recursive`
+first if it's empty:
 
 - **Corpus** — `ThirdParty/OpenJLS/Verification/Golden model/prepare_images.sh`
   (fetches the curated public datasets + synthesizes the depth/boundary probes).
@@ -57,8 +61,9 @@ exact command for anything missing):
 - **Client** — `make -C ../Software ojls_client`.
 - **Bitstreams** — `../Hardware/pynq-z2/build_all_bitness.sh`.
 - **Board** — reachable over ssh with **key-based** auth, the demo `Software/`
-  built there (`ojls_server`), and brought up once with `board_setup.sh` (loads
-  PL + overlay + `u-dma-buf`, starts the server; see
+  built there (`ojls_server`), the first-time boot setup done
+  (`../Hardware/pynq-z2/setup_bootargs.sh` + reboot), and brought up once with
+  `board_setup.sh` (loads PL + `u-dma-buf`, starts the server; see
   `../Hardware/pynq-z2/INTERNALS.md`). The driver stages the bitstreams and
   reload script itself.
 
