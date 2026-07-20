@@ -13,7 +13,8 @@ submodule pinned at the verified commit.
 | [`EncodeOverEthernet/`](EncodeOverEthernet/README.md) | Stream raw images to a board over Ethernet, encode them 100% in the FPGA, stream the `.jls` files back. A PYNQ-Z2 build is provided; other boards get sibling directories. |
 | `ThirdParty/OpenJLS` | The encoder core (submodule), used by every project. |
 
-## Results
+## Encode over Ethernet
+### Results
 
 Verified in hardware on a PYNQ-Z2: across the full verification corpus —
 **287 images spanning every supported pixel depth (8–16 bits)** — the FPGA
