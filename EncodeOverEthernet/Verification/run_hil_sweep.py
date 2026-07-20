@@ -43,6 +43,9 @@ Configuration (all via environment, sensible defaults for the in-tree layout):
   PORT             server TCP port (default 19020)
   TX_BYTES         board tx buffer cap; images above it are skipped (default 128M,
                    the scatter-gather overlay's udmabuf-ojls-tx size)
+  HW_MAX_W         hardware max image width; wider images are skipped (default
+  HW_MAX_H         / height   65535, the packaged IP's MAXDIM ceiling; the
+                   server still enforces the true synthesized OJLS_REG_MAXDIM)
 
 Usage:
   ./run_hil_sweep.py                 # full sweep over every available depth
@@ -76,6 +79,13 @@ CLIENT = env("CLIENT", os.path.join(DEMO, "Software", "ojls_client"))
 OUT_DIR = env("OUT_DIR", os.path.join(HERE, "out"))
 PORT = int(env("PORT", "19020"))
 TX_BYTES = int(env("TX_BYTES", str(128 * 1024 * 1024)))
+# The shipped bitstreams are built with MAX_IMAGE_WIDTH/HEIGHT {65535}
+# (design_encode_ethernet.tcl), the IP's ceiling and the JPEG-LS spec max.
+# The server reads the true synthesized limits from OJLS_REG_MAXDIM and
+# rejects anything larger, so this host-side pre-skip is only a convenience
+# for down-sized custom builds (override via HW_MAX_W / HW_MAX_H).
+HW_MAX_W = int(env("HW_MAX_W", "65535"))
+HW_MAX_H = int(env("HW_MAX_H", "65535"))
 
 REF_DIR = os.path.join(OJLS, "Verification", "T87 conformance", "Reference Images")
 GATE_PGM = os.path.join(REF_DIR, "TEST16.PGM")
@@ -278,7 +288,7 @@ def encode_one(args, path):
     r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120)
     if r.returncode != 0:
         lines = r.stdout.decode(errors="replace").strip().splitlines()
-        raise Fail("client: " + (lines[-1] if lines else "failed"))
+        raise Fail("client: " + (" | ".join(lines) if lines else "failed"))
     golden = os.path.join(OUT_DIR, "golden", stem + ".jls")
     if not os.path.exists(golden):
         charls_encode(path, golden)
@@ -362,6 +372,11 @@ def main():
             if in_bytes > TX_BYTES:
                 print(f"  skip {name}: {in_bytes} B > tx buffer {TX_BYTES} B")
                 results.append((n, name, "skip-too-large", in_bytes, 0))
+                tally[2] += 1
+                continue
+            if w > HW_MAX_W or h > HW_MAX_H:
+                print(f"  skip {name}: {w}x{h} exceeds hardware max {HW_MAX_W}x{HW_MAX_H}")
+                results.append((n, name, "skip-hw-dims", in_bytes, 0))
                 tally[2] += 1
                 continue
             try:
