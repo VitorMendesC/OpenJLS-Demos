@@ -1,5 +1,5 @@
 # Sweep scratch: encoded outputs, cached CharLS goldens, results.csv
-out/
+out/*
 !out/results.csv
 
 # Python bytecode from importing the driver
