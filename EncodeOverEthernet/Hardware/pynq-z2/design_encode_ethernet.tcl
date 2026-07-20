@@ -774,6 +774,11 @@ proc create_root_design { parentCell } {
 
   # Create instance: openjls_axis_regs_0, and set properties
   set openjls_axis_regs_0 [ create_bd_cell -type ip -vlnv vitormendescamilo:openjls:openjls_axis_regs:1.0 openjls_axis_regs_0 ]
+  set_property -dict [list \
+    CONFIG.MAX_IMAGE_HEIGHT {65535} \
+    CONFIG.MAX_IMAGE_WIDTH {65535} \
+  ] $openjls_axis_regs_0
+
 
   # Create interface connections
   connect_bd_intf_net -intf_net axi_dma_0_M_AXIS_MM2S [get_bd_intf_pins axi_dma_0/M_AXIS_MM2S] [get_bd_intf_pins openjls_axis_regs_0/s_axis_pixel]
