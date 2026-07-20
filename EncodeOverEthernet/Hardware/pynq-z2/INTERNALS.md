@@ -22,7 +22,7 @@ raise the clock, the build fails rather than producing an unreliable bitstream.
 **Why Scatter/Gather.** SG lets the DMA chain descriptors, so one transfer is no
 longer capped at the 64 MiB a 26-bit length register allows. An image is bounded
 only by the `u-dma-buf` sizes, and thus by how much DRAM the board reserves (see
-[Large images and the CMA pool](#large-images-and-the-cma-pool)).
+[Large images and the DMA carveout](#large-images-and-the-dma-carveout)).
 
 **Why the S2MM status stream is disabled** (`c_sg_include_stscntrl_strm 0`).
 This is the hard-won one: with the AXI-Ethernet-style SG control/status
@@ -140,23 +140,32 @@ in the order that matters.
    `echo 40000000.fabric > /sys/bus/platform/drivers/uio_pdrv_genirq/unbind`.)
    Just don't also have PYNQ's full Python overlay (`base.bit`) driving the PL.
 
-2. **Load the bitstream first**, then the overlay, so devices probe against
-   hardware that exists:
+2. **The overlay is already live** — U-Boot applied `openjls.dtbo` at boot
+   (`setup_bootargs.sh` installed it in `/boot` with a `uenvcmd` that patches
+   it into the FIT's device tree before the kernel starts). It has to happen
+   there: the DMA buffers live in `reserved-memory` carveouts, and the kernel
+   only honors those from the device tree it *boots* with — a runtime
+   (configfs) overlay would reserve nothing. Verify, then load the bitstream:
 
    ```sh
-   cp system.bit.bin openjls.dtbo /lib/firmware/
+   ls /proc/device-tree/reserved-memory/       # expect ojls-desc@…, ojls-tx@…, ojls-rx@…
+
+   cp system.bit.bin /lib/firmware/
    echo 0 > /sys/class/fpga_manager/fpga0/flags
    echo system.bit.bin > /sys/class/fpga_manager/fpga0/firmware
    cat /sys/class/fpga_manager/fpga0/state     # expect "operating"
-
-   mkdir /sys/kernel/config/device-tree/overlays/openjls
-   echo openjls.dtbo > /sys/kernel/config/device-tree/overlays/openjls/path
    ```
+
+   If the `ojls-*` nodes are missing, the boot hook didn't run (or fell back
+   to a stock boot): re-run `setup_bootargs.sh` as root and reboot. The
+   overlay's device nodes are inert until the PL is loaded — `generic-uio`
+   and `u-dma-buf` don't touch the fabric at probe — so boot-time apply with
+   the PL still unconfigured is fine.
 
 3. **UIO**: the PYNQ image normally boots with
    `uio_pdrv_genirq.of_id=generic-uio` already on the kernel command line —
    check `grep generic-uio /proc/cmdline`. If it's missing, `setup_bootargs.sh`
-   adds it to the bootargs (see [Large images and the CMA pool](#large-images-and-the-cma-pool)),
+   adds it to the bootargs,
    or `modprobe uio_pdrv_genirq of_id=generic-uio` when it's a module.
    Then:
 
@@ -165,19 +174,14 @@ in the order that matters.
    cat /sys/class/uio/uio*/name    # among them, expect "openjls" and "dma"
    ```
 
-4. **Free the CMA pool held by zocl-drm** — the one non-obvious boot hazard.
-   The stock image's `zocl-drm` driver grabs and *fragments* the CMA pool at
-   boot, so the 176 MiB `rx` buffer fails to allocate even when the pool is
-   nominally large enough (`dmesg`: `cma_alloc ... ret:-16` then `-12`). Unbind
-   it **before** the first `u-dma-buf` insmod, and compact if the kernel
-   supports it:
-
-   ```sh
-   systemctl stop jupyter 2>/dev/null || true
-   echo axi:zyxclmm_drm > /sys/bus/platform/drivers/zocl-drm/unbind
-   sync; echo 3 > /proc/sys/vm/drop_caches
-   [ -w /proc/sys/vm/compact_memory ] && echo 1 > /proc/sys/vm/compact_memory
-   ```
+4. **DMA buffers come from exclusive carveouts** — not CMA. The overlay's
+   `reserved-memory` pools (`ojls-{tx,rx,desc}`, ~256 MiB total, `no-map`)
+   are claimed at early boot before anything can touch or fragment them, so
+   `u-dma-buf`'s allocations are deterministic at any uptime — there is
+   nothing to free, unbind, or compact first. (Earlier revisions allocated
+   from an enlarged CMA pool and fought the stock image for it each boot;
+   see [Large images and the DMA carveout](#large-images-and-the-dma-carveout)
+   for that history and the sizing rules.)
 
 5. **u-dma-buf** — the DMA-buffer kernel module. The quickstart doesn't build
    this on the board (the board may have no internet, and a `.ko` is tied to one
@@ -195,8 +199,8 @@ in the order that matters.
    ```
 
    Confirm it loaded: `ls /sys/class/u-dma-buf/` should list
-   `udmabuf-ojls-{tx,rx,desc}`. These buffers are large (128 + 176 MiB); if the
-   `-tx`/`-rx` entries are missing, the pool was too small or too fragmented —
+   `udmabuf-ojls-{tx,rx,desc}`. If an entry is missing, its carveout wasn't in
+   the boot device tree (step 2), or a node's `size` doesn't match its pool —
    see below.
 
 6. **Run**:
@@ -224,66 +228,80 @@ automates this across every precision.
 ### Undo / reload
 
 ```sh
-rmdir /sys/kernel/config/device-tree/overlays/openjls   # remove overlay
-# reload a new bitstream via fpga0/firmware, then re-apply the overlay
+# reload a new bitstream via fpga0/firmware at any time — the boot-time
+# overlay is precision-independent and stays as is. To remove the overlay
+# permanently, delete the uenvcmd line from /boot/uEnv.txt (and the dtbo
+# from /boot) and reboot.
 ```
 
-For swapping precisions on an already-set-up board (overlay + `u-dma-buf` stay
+For swapping precisions on an already-set-up board (`u-dma-buf` stays
 loaded, only the PL image and server cycle), the HIL sweep uses the lighter
 `board_reload.sh` instead of a full `board_setup.sh`.
 
-## Large images and the CMA pool
+## Large images and the DMA carveout
 
 With Scatter/Gather the DMA is no longer the limit, so the largest image the
-board can encode is set by the two DMA buffers, which `u-dma-buf` carves out of
-the kernel **CMA pool**. The admission rule the server enforces is:
+board can encode is set by the two DMA buffers, which `u-dma-buf` takes from
+dedicated **reserved-memory carveouts** — not from CMA. The admission rule the
+server enforces is:
 
 ```
 input  <= udmabuf-ojls-tx.size
 output <= udmabuf-ojls-rx.size   (worst case ~ input + 25% + slack)
 ```
 
-The overlay ships 128 MiB (tx) + 176 MiB (rx) + 256 KiB (desc) ≈ **304 MiB**,
-so the encoder accepts images up to a **128 MiB raw** frame — comfortably past
-every image in the golden corpus. The buffers only allocate if the CMA pool is
-at least that big; the stock image defaults to `cma=128M`, which is too small.
+The overlay declares three `no-map` pools (`ojls-{tx,rx,desc}`) of
+128 MiB (tx) + 128 MiB (rx) + 256 KiB (desc) ≈ **256 MiB**, so the encoder
+accepts raw frames up to ~100 MiB (the rx output guard, worst case
+raw + 25% + slack, binds before tx's 128 MiB) — comfortably past every image in
+the golden corpus. Because the overlay is merged into the device tree by U-Boot
+(`uenvcmd` in `uEnv.txt`) *before* the kernel starts, the spans are reserved
+before any allocator runs: they are contiguous by construction, can never be
+fragmented by zocl-drm or anything else, and allocate identically at any
+uptime. No `cma=` tuning is needed — the stock `cma=128M` is untouched and
+stays available to the rest of the system.
 
-**Grow the pool** on the kernel command line (persistent). `setup_bootargs.sh`
-does exactly this — it edits the `bootargs=` line in the FAT `boot` partition's
-`uEnv.txt` (which U-Boot imports at boot), seeding from the running command line
-so `root=…` is kept and adding `cma=320M` (and `generic-uio`) only if absent. To
-do it by hand, or to set a different size, edit that line to add `cma=320M`, then
-reboot and confirm:
-
-```sh
-grep cma /proc/cmdline
-cat /sys/kernel/debug/cma/*/count 2>/dev/null   # pages in the pool
-```
-
-The board has **512 MiB** total, so `cma=320M` leaves ~192 MiB for Linux — tight
-for the stock Ubuntu userspace. If the system is unstable or the alloc still
-fails, stop the services the demo doesn't need:
+Confirm the reservation and the buffers after boot:
 
 ```sh
-systemctl disable --now jupyter.service pynq-x11.service lightdm 2>/dev/null || true
-free -m    # confirm headroom before raising cma further
+ls /proc/device-tree/reserved-memory/    # ojls-tx / ojls-rx / ojls-desc nodes
+ls /sys/class/u-dma-buf/                 # udmabuf-ojls-{tx,rx,desc}
 ```
 
-Note the buffers need their span **contiguous**, not just free by total:
-`CmaFree` can report more than 176 MiB and the `rx` alloc still fail because no
-single 176 MiB run is available. Unbinding zocl-drm and compacting (step 4
-above) is what makes a contiguous span; a fresh reboot gives the cleanest pool.
-`CONFIG_COMPACTION` is absent on some stock kernels (no
-`/proc/sys/vm/compact_memory`) — then only a reboot defragments.
+Each `u-dma-buf` node's `size` must exactly match its pool's `reg` length —
+on a mismatch the probe fails and that `/sys/class/u-dma-buf` entry is simply
+absent (check `dmesg | grep u-dma-buf`).
+
+A second, sneakier failure mode: **U-Boot's own relocations**. By default
+U-Boot relocates the (patched) DTB and any initrd to the *top of DDR* — i.e.
+straight into `ojls-rx`, which ends at the 512 MiB top. The kernel then finds
+live data overlapping the region at early boot, refuses to create it
+(`of_reserved_mem_device_init failed. return=-22`), and only `udmabuf-ojls-rx`
+is missing while tx/desc probe fine. The overlay itself is *present* under
+`/proc/device-tree/reserved-memory/` — only the rx pool silently never became
+a real reservation (visible as top-of-DDR entries in
+`/sys/kernel/debug/memblock/reserved`). `setup_bootargs.sh` prevents this by
+writing `fdt_high=0x0ffc0000` and `initrd_high=0x0ffc0000` into
+`/boot/uEnv.txt` (`boot.scr` does a full `env import`, so they take effect
+before `uenvcmd` runs), capping U-Boot's top-down relocation just below the
+lowest carveout. If rx alone is missing after a boot-flow change, check those
+two variables first.
+
+**History.** Earlier revisions allocated these buffers from an enlarged CMA
+pool (`cma=320M`) and had to unbind zocl-drm and compact memory each boot to
+scrape together a contiguous 176 MiB run. The carveout design replaces all of
+that; if you see `cma=320M` on an old SD card it can be reverted to stock.
 
 **Pushing higher.** The ceiling is `DRAM − (Linux working set)`, split ~1 : 1.25
 between tx and rx (the output guard). Each extra 100 MiB of image needs ~225 MiB
-more CMA. On a fully slimmed userspace (~80–100 MiB) the board can reach roughly
-a **180–190 MiB** image (`cma=448M`, tx 192 / rx 248 MiB). To change it: edit
-the three `size` fields in `openjls.dtso`, recompile the overlay
-(`dtc -@ -O dtb -o openjls.dtbo openjls.dtso`), and set `cma=` to at least their
-sum. Measure the real Linux floor with `free -m` under load first —
-over-reserving CMA will OOM the board, not just fail the alloc.
+more carveout, taken directly out of Linux's 512 MiB. On a fully slimmed
+userspace (~80–100 MiB) the board can reach roughly a **180–190 MiB** image
+(tx 192 / rx 248 MiB). To change it: edit each pool's `reg` (base **and**
+length — keep the pools adjacent and below the kernel's view of DDR) and the
+matching `size` in the `u-dma-buf` nodes in `openjls.dtso`, recompile
+(`dtc -@ -O dtb -o openjls.dtbo openjls.dtso`), copy the dtbo to `/boot`, and
+reboot. Measure the real Linux floor with `free -m` under load first —
+over-reserving will OOM the board at boot, not just fail an alloc.
 
 ## Porting to another board
 
@@ -301,13 +319,20 @@ Zynq-MPSoC board, give it a sibling directory under `Hardware/` and adapt:
   `build.tcl` gates on WNS, so raising
   `PCW_*FPGA0_PERIPHERAL_FREQMHZ` and rebuilding will *tell you* if it doesn't
   close — trust that gate rather than shipping a violating bitstream.
-* **DRAM and the CMA pool** — the 128/176 MiB buffer sizes and `cma=320M` assume
-  512 MiB of DDR. Scale the three `openjls.dtso` `size` fields and `cma=` to your
-  board's DRAM and target image size (see the section above).
-* **The CMA boot hazard is PYNQ-specific** — `zocl-drm` grabbing the pool is a
-  stock-PYNQ-image thing. On a different rootfs the culprit (if any) differs;
-  the general fix is the same: free/compact CMA before the first `u-dma-buf`
-  insmod. `board_setup.sh`'s zocl-drm unbind is a no-op where it isn't bound.
+* **DRAM and the carveouts** — the 128/128 MiB buffer sizes assume 512 MiB of
+  DDR. Scale each pool's `reg` (base and length) and the matching `u-dma-buf`
+  `size` fields in `openjls.dtso` to your board's DRAM and target image size
+  (see the section above). More DDR means the pools can simply grow; there is
+  no CMA sizing to coordinate.
+* **Boot-time overlay application is the load-bearing part** — the carveouts
+  only work because U-Boot merges the dtbo *before* the kernel boots
+  (`uenvcmd` in `uEnv.txt`). A different board's boot flow (extlinux,
+  distro-boot scripts, FIT images) needs an equivalent hook; applying the
+  overlay at runtime via configfs is too late for `reserved-memory` and will
+  quietly leave the pools unreserved. The boot loader's fdt/initrd
+  relocations must also be kept out of the carveouts (`fdt_high` /
+  `initrd_high`, see above) — especially for pools that end at the top of
+  DDR, U-Boot's favourite relocation target.
 * **UIO on the command line** — `uio_pdrv_genirq.of_id=generic-uio` must be in
   bootargs (or modprobed). Different images vary in whether it's built in.
 * **Precision** — nothing precision-specific is board-specific; the per-BITNESS

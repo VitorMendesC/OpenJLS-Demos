@@ -21,9 +21,11 @@ you're changing the design.
   **one** precision. This is the quickstart path below.
 * `build_all_bitness.sh` — build them for **every** precision (8..16): a
   bitstream per depth plus the shared overlay, staged for the HIL sweep.
-* `setup_bootargs.sh` — one-time, first-boot: put `generic-uio` and `cma=320M`
-  on the kernel command line (`/boot/uEnv.txt`). Run once per board as root, then
-  reboot; idempotent.
+* `setup_bootargs.sh` — one-time, first-boot: put `generic-uio` on the kernel
+  command line and install `openjls.dtbo` + a U-Boot `uenvcmd` (`/boot/uEnv.txt`)
+  so the overlay — and the DMA carveout it reserves — is applied **at boot**.
+  Run once per board as root with `openjls.dtbo` next to it, then reboot;
+  idempotent.
 * `board_setup.sh` — [in `../../Verification/`](../../Verification/board_setup.sh);
   one-shot board bring-up.
 * `build.tcl` / `design_encode_ethernet.tcl` — recreate the Vivado project and
@@ -55,8 +57,10 @@ is `192.168.3.1` over USB or `pynq` over Ethernet):
 ```sh
 BOARD=xilinx@192.168.3.1
 scp bitstreams/encode_eth_openjls_b8.bit.bin "$BOARD:~/bitstreams/"
-scp openjls.dtbo u-dma-buf.ko "$BOARD:~/"     # .ko ships in the repo, prebuilt
+scp u-dma-buf.ko "$BOARD:~/"                  # ships in the repo, prebuilt
 scp -r ../../Software "$BOARD:~/"             # first time only
+# first time only: openjls.dtbo + setup_bootargs.sh, then run it and reboot
+scp openjls.dtbo setup_bootargs.sh "$BOARD:~/"
 ```
 
 **3. Bring the board up** (on the board, as root — one command per boot):
@@ -66,7 +70,8 @@ scp -r ../../Software "$BOARD:~/"             # first time only
 sudo env HOME=$HOME ./board_setup.sh 8
 ```
 
-`board_setup.sh` loads the PL, applies the overlay, frees the CMA pool, loads
+`board_setup.sh` loads the PL, verifies the boot-time overlay and its DMA
+carveout are live (run `setup_bootargs.sh` + reboot first if not), loads
 `u-dma-buf`, verifies the buffers, and starts the server — idempotent, safe to
 re-run.
 
