@@ -23,13 +23,15 @@ submodule and are produced by its scripts. Missing prerequisites are reported
 with the exact command to run, not worked around.
 
 Configuration (all via environment, sensible defaults for the in-tree layout):
-  BOARD            ssh target for the board, e.g. xilinx@192.168.2.99 (required
-                   unless --dry-run). Key-based auth only — set up a key first.
+  BOARD            ssh target for the board (default: xilinx@192.168.2.99, the
+                   address the READMEs standardize on; set BOARD= empty to
+                   force --dry-run-only use). Key-based auth only — set up a
+                   key first.
   BOARD_IP         board IP the client connects to (default: host part of BOARD)
   SSH_KEY          path to an ssh private key (optional)
   SSH_OPTS         extra ssh/scp options (optional)
-  SUDO_PASS        board sudo password (PYNQ default: xilinx). If unset, the
-                   board-side reload runs plain `sudo` (passwordless).
+  SUDO_PASS        board sudo password (default: xilinx, the PYNQ stock
+                   password). Set SUDO_PASS= empty for passwordless `sudo`.
   BOARD_HOME       board home dir (default: /home/<user-of-BOARD>)
   BOARD_SERVER_DIR dir holding the built ojls_server on the board
                    (default: $BOARD_HOME/Software)
@@ -307,11 +309,11 @@ def main():
                     help="skip the CharLS T16E0.JLS trust gate")
     args = ap.parse_args()
 
-    args.board = env("BOARD", "")
+    args.board = env("BOARD", "xilinx@192.168.2.99")
     args.board_ip = env("BOARD_IP", args.board.split("@")[-1] if args.board else "")
     args.ssh_key = env("SSH_KEY", "")
     args.ssh_opts = env("SSH_OPTS", "")
-    args.sudo_pass = env("SUDO_PASS", "")
+    args.sudo_pass = env("SUDO_PASS", "xilinx")
     user = args.board.split("@")[0] if "@" in args.board else "xilinx"
     args.board_home = env("BOARD_HOME", f"/home/{user}")
     args.board_server_dir = env("BOARD_SERVER_DIR", f"{args.board_home}/Software")
